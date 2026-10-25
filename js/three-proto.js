@@ -433,8 +433,14 @@ import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js'
       return m;
     });
     const laserPool = makePool(() => new THREE.Mesh(
-      new THREE.BoxGeometry(0.24, 0.24, 1),
-      new THREE.MeshBasicMaterial({ color: 0x5fd0ff, transparent: true, depthWrite: false })));
+      new THREE.BoxGeometry(0.34, 0.34, 1),
+      new THREE.MeshBasicMaterial({ color: 0x5fd0ff, transparent: true, depthWrite: false,
+        blending: THREE.AdditiveBlending })));
+    /* 激光端点命中闪光（墙弹点/坦克命中点反馈） */
+    const laserHitPool = makePool(() => new THREE.Mesh(
+      new THREE.SphereGeometry(0.42, 10, 8),
+      new THREE.MeshBasicMaterial({ color: 0x5fd0ff, transparent: true, depthWrite: false,
+        blending: THREE.AdditiveBlending })));
 
     /* 粒子：单个 Points 动态缓冲（数百粒子零 draw call 开销） */
     const MAX_P = 512;
@@ -690,23 +696,34 @@ import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js'
         }
       }
 
-      /* 激光（分段光束，随 life 淡出） */
+      /* 激光：分段光束 + 端点命中闪光（字段名对齐 pickup.js 的 x1,y1,x2,y2），
+       * 随 life 淡出；命中坦克时 hitTank 有目标（伤害/爆炸由游戏逻辑走原特效管线） */
       laserPool.hideAll();
+      laserHitPool.hideAll();
+      let laserBeams = 0;
       if (!menu) {
         for (const ls of game.lasers) {
           const k = ls.life / ls.maxLife;
           for (const seg of ls.segments) {
+            const x0 = seg.x1 / PX, z0 = seg.y1 / PX, x1 = seg.x2 / PX, z1 = seg.y2 / PX;
+            const len = Math.hypot(x1 - x0, z1 - z0);
+            if (len < 0.01) continue;
             const m = laserPool.acquire();
-            const x0 = seg.x0 / PX, y0 = seg.y0 / PX, x1 = seg.x1 / PX, y1 = seg.y1 / PX;
-            const len = Math.hypot(x1 - x0, y1 - y0);
-            m.position.set((x0 + x1) / 2, 0.85, (y0 + y1) / 2);
+            m.position.set((x0 + x1) / 2, 0.85, (z0 + z1) / 2);
             m.scale.set(1, 1, len);
-            m.rotation.y = Math.atan2(x1 - x0, y1 - y0);
+            m.rotation.y = Math.atan2(x1 - x0, z1 - z0);
             m.material.color.set(ls.color);
             m.material.opacity = Math.min(1, k * 1.6);
+            const f = laserHitPool.acquire();
+            f.position.set(x1, 0.85, z1);
+            f.material.color.set(ls.color);
+            f.material.opacity = Math.min(1, k * 1.8);
+            f.scale.setScalar(0.55 + 0.5 * (1 - k));
+            laserBeams++;
           }
         }
       }
+      report.lasers = laserBeams;
 
       /* 特效（消费 game.effects 的世界坐标数据） */
       const fx = game.effects;

@@ -271,6 +271,24 @@
           check('C-贴墙 | 贴墙开火炮弹生成于墙外（本图无贴墙点，跳过）', true, '');
         }
       }
+
+      /* ---------- C-激光：激光道具有可见光束（分段 + 命中端点） ---------- */
+      {
+        game.player.x = spot.x; game.player.y = spot.y; game.player.speed = 0;
+        game.player.angle = game.player.aimAngle = -0.35;
+        game.player.powerup = 'laser'; game.player.powerupShots = 1;
+        game.player.cooldown = 0;
+        game.bullets.length = 0; game.lasers.length = 0;
+        aimMouseAt(spot.x + Math.cos(-0.35) * 60, spot.y + Math.sin(-0.35) * 60);
+        game.update(1 / 60);
+        fireOne(-0.35);
+        game.render();
+        const segs = (game.lasers[0] && game.lasers[0].segments.length) || 0;
+        check('C-激光 | 激光发射生成折射光束段', game.lasers.length >= 1 && segs >= 1,
+          'lasers=' + game.lasers.length + ' 段=' + segs);
+        check('C-激光 | 3D 层光束在渲染', (P3.lasers || 0) >= 1, 'beams=' + P3.lasers);
+        game.player.powerup = null; game.player.powerupShots = 0;
+      }
     }
 
     /* ================= D 碰撞边界 ================= */
@@ -635,6 +653,14 @@
         aimMouseAt(p.x + Math.cos(-0.5) * 60, p.y + Math.sin(-0.5) * 60);
         game.update(1 / 60);
         fireOne(-0.5);
+      } else if (pose === 'laser') {
+        p.angle = p.aimAngle = -0.35;
+        aimMouseAt(p.x + Math.cos(-0.35) * 60, p.y + Math.sin(-0.35) * 60);
+        p.powerup = 'laser'; p.powerupShots = 1; p.cooldown = 0;
+        game.update(1 / 60);
+        fireOne(-0.35);
+        for (let s = 0; s < 4; s++) game.update(1 / 60);   // 光束寿命前段定格
+        p.powerup = null;
       } else if (pose === 'wall') {
         p.angle = p.aimAngle = 0;
         p.y = spot.y; p.x = game.maze.width - 9 - p.radius - 1.5;
