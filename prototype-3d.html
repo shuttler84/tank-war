@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>坦克动荡：3D 接入原型（阶段2a）</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  /* 仅本原型页：WebGL 画布垫在 2D HUD 画布之下，二者都铺满 #stage */
+  #gl { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  #game { position: relative; }   /* 抬高到 #gl 之上（DOM 顺序 + 定位层级） */
+  #proto-status {
+    position: fixed; left: 10px; bottom: 10px; z-index: 60;
+    font: 11px/1.5 Consolas, monospace; color: #9FE8FF;
+    background: rgba(7, 17, 27, 0.82); border: 1px solid rgba(56, 216, 245, 0.4);
+    border-radius: 6px; padding: 6px 10px; pointer-events: none; white-space: pre;
+  }
+  #proto-status .err { color: #FF7B6B; font-weight: bold; }
+</style>
+<script type="importmap">
+{ "imports": { "three": "./vendor/three.module.js", "three/addons/": "./vendor/addons/" } }
+</script>
+</head>
+<body>
+<div id="app">
+  <div id="stage">
+    <!-- WebGL 层：js/three-proto.js 渲染 3D 场景（地面/墙体/坦克/子弹） -->
+    <canvas id="gl"></canvas>
+    <!-- 2D 层：原有 HUD/准星/小地图 + 输入事件接收入（保持原有交互） -->
+    <canvas id="game"></canvas>
+
+    <div class="overlay" id="overlay">
+
+      <button type="button" class="hud-pause" id="btn-hud-pause" hidden
+              title="暂停 (P / Esc)">❚❚ 暂停</button>
+
+      <section class="screen screen-menu" id="screen-menu">
+        <header class="topbar">
+          <div class="brand">
+            <h1>坦克动荡<span>3D 原型</span></h1>
+            <p class="tagline">TANK TURMOIL · 3D VIEW PROTOTYPE</p>
+          </div>
+          <div class="topbar-actions">
+            <button type="button" class="ghost slim" id="btn-fullscreen" title="切换浏览器全屏">⛶ 全屏</button>
+            <button type="button" class="ghost slim" id="btn-sound">音效：开</button>
+            <span class="version">原型 · Three.js r170</span>
+          </div>
+        </header>
+
+        <div class="menu-body">
+          <aside class="menu-side">
+            <section class="holo-panel map-info" id="map-info" aria-live="polite"></section>
+
+            <section class="holo-panel settings-panel">
+              <div class="opt-row" data-group="enemies">
+                <div class="opt-label">敌人</div>
+                <div class="opt-choices">
+                  <button type="button" class="choice" data-value="1">1 辆</button>
+                  <button type="button" class="choice" data-value="2">2 辆</button>
+                  <button type="button" class="choice" data-value="3">3 辆</button>
+                  <button type="button" class="choice" data-value="4">4 辆</button>
+                  <button type="button" class="choice" data-value="5">5 辆</button>
+                </div>
+              </div>
+              <span class="opt-note" id="enemy-note">标准图最多 5 辆</span>
+
+              <div class="opt-row" data-group="lives">
+                <div class="opt-label">生命</div>
+                <div class="opt-choices">
+                  <button type="button" class="choice" data-value="1">1 条</button>
+                  <button type="button" class="choice" data-value="3">3 条</button>
+                  <button type="button" class="choice" data-value="5">5 条</button>
+                </div>
+              </div>
+
+              <div class="opt-row" data-group="difficulty">
+                <div class="opt-label">难度</div>
+                <div class="opt-choices">
+                  <button type="button" class="choice" data-value="easy">简单</button>
+                  <button type="button" class="choice" data-value="normal">普通</button>
+                  <button type="button" class="choice" data-value="hard">困难</button>
+                </div>
+              </div>
+            </section>
+
+            <div class="settings-summary" id="settings-summary"></div>
+            <button type="button" class="primary" id="btn-start">开始战斗</button>
+          </aside>
+
+          <section class="map-select" aria-label="地图选择">
+            <div class="map-group" data-group="map">
+              <h2 class="group-title">标准战区 <em>小图 · 紧凑交战</em></h2>
+              <div class="map-cards" id="map-cards-small"></div>
+            </div>
+            <div class="map-group" data-group="map">
+              <h2 class="group-title">大型战区 <em>大图 · 摄像机跟随</em></h2>
+              <div class="map-cards" id="map-cards-big"></div>
+            </div>
+          </section>
+        </div>
+
+        <footer class="tips">
+          <div class="tip"><b>圆内瞄准</b><span>鼠标在坦克周围隐形圆内 → 原地转向瞄准</span></div>
+          <div class="tip"><b>圆外移动</b><span>鼠标在圆外 → 朝该方向持续前进</span></div>
+          <div class="tip"><b>左键开火</b><span>子弹会反弹 · P / Esc 暂停 · R 重开</span></div>
+        </footer>
+      </section>
+
+      <section class="screen screen-modal" id="screen-pause" hidden>
+        <div class="panel narrow">
+          <h2 class="screen-title">已暂停</h2>
+          <p class="muted">战场已冻结，继续后鼠标立即恢复控制。</p>
+          <div class="btn-col">
+            <button type="button" class="primary" id="btn-resume">继续游戏</button>
+            <button type="button" class="ghost" id="btn-restart">重新开始</button>
+            <button type="button" class="ghost" id="btn-menu">返回主菜单</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="screen screen-modal" id="screen-over" hidden>
+        <div class="panel narrow">
+          <div class="result-icon" id="over-icon">★</div>
+          <h2 class="screen-title" id="over-title">胜利</h2>
+          <p class="muted" id="over-sub">全部敌方坦克已被击毁。</p>
+          <div class="stats">
+            <div class="stat"><span id="over-score">0</span><em>得分</em></div>
+            <div class="stat"><span id="over-kills">0</span><em>击毁</em></div>
+            <div class="stat"><span id="over-time">0 秒</span><em>用时</em></div>
+          </div>
+          <div class="btn-col">
+            <button type="button" class="primary" id="btn-again">再来一局</button>
+            <button type="button" class="ghost" id="btn-menu2">返回主菜单</button>
+          </div>
+        </div>
+      </section>
+
+    </div>
+  </div>
+</div>
+
+<div id="proto-status">初始化…</div>
+
+<!-- 与 index.html 完全相同的游戏脚本（本阶段不修改任何现有文件） -->
+<script src="js/config.js"></script>
+<script src="js/mapsize.js"></script>
+<script src="js/utils.js"></script>
+<script src="js/isoview.js"></script>
+<script src="js/physics.js"></script>
+<script src="js/maze.js"></script>
+<script src="js/bullet.js"></script>
+<script src="js/tank.js"></script>
+<script src="js/effects.js"></script>
+<script src="js/pickup.js"></script>
+<script src="js/ai.js"></script>
+<script src="js/control.js"></script>
+<script src="js/game.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/main.js"></script>
+
+<!-- 3D 视图原型（模块，经 importmap 解析本地 vendor 依赖） -->
+<script type="module" src="js/three-proto.js"></script>
+
+<!-- 诊断（内联，不依赖模块成功加载）：报告游戏与模块的就绪状态 -->
+<script>
+(function () {
+  var errs = [];
+  var rafN = 0;
+  window.addEventListener('error', function (e) { errs.push(String(e.message)); });
+  window.addEventListener('unhandledrejection', function (e) { errs.push(String(e.reason)); });
+  function tickRaf() { rafN++; requestAnimationFrame(tickRaf); }
+  requestAnimationFrame(tickRaf);
+  function poll() {
+    var el = document.getElementById('proto-status');
+    if (!el || window.__proto3dReported) return;
+    var lines = [];
+    lines.push('游戏 ' + (window.__tankGame ? '✓' : '未启动'));
+    lines.push('3D模块 ' + (window.__proto3d ? (window.__proto3d.webgl ? '✓' : '初始化中') : '未执行'));
+    lines.push('rAF ' + rafN + ' 次');
+    if (errs.length) lines.push('JS错误: ' + errs.slice(0, 3).join(' / '));
+    el.textContent = lines.join('\n');
+    setTimeout(poll, 200);
+  }
+  document.addEventListener('DOMContentLoaded', poll);
+})();
+</script>
+</body>
+</html>

@@ -6,3 +6,6 @@ desktop.ini
 # 临时文件
 *.log.tmp
 *~
+
+# 无头浏览器运行时的临时用户数据目录
+node-tmp/
