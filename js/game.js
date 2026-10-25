@@ -1528,10 +1528,11 @@ class Game {
       ctx.fillRect(mx + w.x * sx, my + w.y * sy, Math.max(0.9, w.w * sx), Math.max(0.9, w.h * sy));
     }
 
-    // 当前视野（等距模式：可见 iso 窗口四角逆投影为世界菱形）
+    // 当前视野（等距模式：可见 iso 窗口四角逆投影为世界菱形；
+    // minimapHideViewRect：3D 视图按需隐藏该指示框）
     ctx.strokeStyle = T.accentLine;
     ctx.lineWidth = 1.4;
-    if (this.isoActive && this.iso) {
+    if (this.isoActive && this.iso && !this.minimapHideViewRect) {
       // 视野四边形：3D 拉近时用 3D 层提供的真实可见区（viewWorldRect），
       // 缺省回退等距窗口四角逆投影
       const cs = (this.viewWorldRect && this.viewWorldRect.length === 4)

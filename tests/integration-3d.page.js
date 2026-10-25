@@ -511,7 +511,7 @@
         }
 
         /* ① 持续机动采样（10s 直驱 + 停滞切向绕行）：证明操控持续产生位移 */
-        let maxCamErr = 0, total = 0, detour = 0;
+        let maxCamErr = 0, total = 0, detour = 0, onScreenMin = 1e9;
         for (let seg = 0; seg < 20; seg++) {
           let dx = tgt[0] - p.x, dy = tgt[1] - p.y;
           const a0 = Math.atan2(dy, dx) + detour * (Math.PI / 3);
@@ -528,9 +528,16 @@
           maxCamErr = Math.max(maxCamErr,
             Math.abs(game.camera.x - iso.clampCamX(pp.x)),
             Math.abs(game.camera.y - iso.clampCamY(pp.y)));
+          // 3D 可视带必须覆盖玩家（边缘钳制后走出画面=地图边缘"不可达"的根因）
+          game.render();
+          const sc = P3.project(p.x, p.y);
+          onScreenMin = Math.min(onScreenMin,
+            sc.x, game.viewW - sc.x, sc.y, game.viewH - sc.y);
         }
         check('H-跟随 | 视野逐帧跟随玩家（含边界钳制，偏差 ≤6px=一帧尾随）', maxCamErr <= 6,
           '最大偏差=' + maxCamErr.toFixed(2) + 'px');
+        check('H-跟随 | 玩家始终在 3D 画面内（边缘留白 ≥16px）', onScreenMin >= 16,
+          '最小屏幕留白=' + onScreenMin.toFixed(0) + 'px');
         check('H-机动 | 持续机动（10s 累计 ≥250px，密走廊直线采样下限）', total >= 250,
           '累计=' + total.toFixed(0) + 'px');
 
@@ -542,12 +549,15 @@
           const d = Math.hypot(c.x - game.maze.width / 2, c.y - game.maze.height / 2);
           if (d > fd) { fd = d; far = c; }
         }
-        let standOk = false, moveOk = false, farCamOk = false;
+        let standOk = false, moveOk = false, farCamOk = false, farOnScreen = 0;
         if (far) {
           p.x = far.x; p.y = far.y; p.speed = 0; p.angle = p.aimAngle = 0;
           standOk = game.maze.isFree(p.x, p.y, p.radius - 0.5);
           game.camera.follow(p.x, p.y, game.maze.width, game.maze.height);
           if (game.isoActive) game.followIsoCamera();
+          game.render();                                    // 同步 3D 相机后测屏幕位置
+          const sc0 = P3.project(p.x, p.y);
+          farOnScreen = Math.min(sc0.x, game.viewW - sc0.x, sc0.y, game.viewH - sc0.y);
           // 朝最开阔方向机动（角落点朝地图中心的直线上常有墙）
           let bestA = 0, bestT = -1;
           for (let k = 0; k < 8; k++) {
@@ -567,7 +577,8 @@
         check('H-可达 | 最远端区域可站立且可机动', standOk && moveOk,
           (far ? '远点=(' + far.x.toFixed(0) + ',' + far.y.toFixed(0) + ')' : '无导航点')
           + ' 站立=' + standOk + ' 机动=' + moveOk);
-        check('H-可达 | 远端区域视野跟随', farCamOk, '');
+        check('H-可达 | 远端区域视野跟随（相机钳制 + 玩家在画面内）',
+          farCamOk && farOnScreen >= 16, '屏幕留白=' + farOnScreen.toFixed(0) + 'px');
 
         // 控制台无未处理错误（模块内 window error/unhandledrejection 捕获）
         check('H-控制台 | 无未处理 JS 错误', (P3.errors || []).length === 0,

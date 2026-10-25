@@ -559,30 +559,73 @@ import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js'
           renderer.setSize(game.viewW, game.viewH, false);
         }
       } else {
-        const cw = iso.unproject(game.camera.x + game.viewW / 2, game.camera.y + game.viewH / 2);
-        tmpV.set(cw.x / PX, 0, cw.y / PX);
-        camera.position.copy(tmpV).addScaledVector(camDir, 200);
-        camera.lookAt(tmpV);
-        // 视野拉近：正交视口按 VIEW_ZOOM 缩小（世界可见区变小、细节放大）；
-        // ?zoom= 可调（1=与等距版一致）。输入映射走 3D 射线逆投影，天然一致
-        const pxPerUnit = Math.SQRT2 * iso.u * PX * VIEW_ZOOM;
-        const top = game.viewH / (2 * pxPerUnit);
-        if (Math.abs(camera.top - top) > 1e-6 || camera.aspect !== game.viewW / game.viewH) {
-          camera.top = top; camera.bottom = -top;
+        /* 3D 跟随（精确解）：目标=玩家世界点，地图四角包围盒钳制在视口内。
+         * 正交相机下"地面世界位移→屏幕位移"是精确线性映射（两个探针点求 2×2
+         * 矩阵），不借道等距投影（两者边缘视差 12~57px，会把玩家挤出画面） */
+        const pl = menu ? null : game.player;
+        const top0 = game.viewH / (2 * Math.SQRT2 * iso.u * PX * VIEW_ZOOM);
+        if (Math.abs(camera.top - top0) > 1e-6 || camera.aspect !== game.viewW / game.viewH) {
+          camera.top = top0; camera.bottom = -top0;
           camera.aspect = game.viewW / game.viewH;
-          camera.left = -top * camera.aspect; camera.right = top * camera.aspect;
+          camera.left = -top0 * camera.aspect; camera.right = top0 * camera.aspect;
           camera.updateProjectionMatrix();
           renderer.setSize(game.viewW, game.viewH, false);
         }
+        const tx0 = pl && pl.alive ? pl.x / PX : maze.width / PX / 2;
+        const tz0 = pl && pl.alive ? pl.y / PX : maze.height / PX / 2;
+        // 先对准玩家（菜单对准地图中心），探针求 K 矩阵
+        tmpV.set(tx0, 0, tz0);
+        camera.position.copy(tmpV).addScaledVector(camDir, 200);
+        camera.lookAt(tmpV);
+        camera.updateMatrixWorld();
+        camera.matrixWorldInverse.copy(camera.matrixWorld).invert();   // project() 依赖逆矩阵
+        const prj = (wx, wz) => {
+          projV.set(wx, 0, wz).project(camera);
+          return { x: (projV.x * 0.5 + 0.5) * game.viewW, y: (-projV.y * 0.5 + 0.5) * game.viewH };
+        };
+        const s0 = prj(tx0, tz0);
+        const Kx = { x: s0.x - prj(tx0 + 1, tz0).x, y: s0.y - prj(tx0 + 1, tz0).y };   // 世界 +x 单位 → 屏幕px（取负号=位移方向）
+        const Kz = { x: s0.x - prj(tx0, tz0 + 1).x, y: s0.y - prj(tx0, tz0 + 1).y };
+        // 地图四角相对玩家的屏幕偏移 → 包围盒
+        const MW = maze.width / PX, MH = maze.height / PX;
+        let b0x = 1e9, b1x = -1e9, b0y = 1e9, b1y = -1e9;
+        for (const [wx, wz] of [[0, 0], [MW, 0], [0, MH], [MW, MH]]) {
+          const ox = (wx - tx0) * -Kx.x + (wz - tz0) * -Kz.x;   // 角点屏幕 − 玩家屏幕
+          const oy = (wx - tx0) * -Kx.y + (wz - tz0) * -Kz.y;
+          b0x = Math.min(b0x, ox); b1x = Math.max(b1x, ox);
+          b0y = Math.min(b0y, oy); b1y = Math.max(b1y, oy);
+        }
+        // 屏幕平移策略：地图覆盖视口 → 玩家居中、视口露出地图外才钳到边（无虚空）；
+        // 地图小于视口 → 地图整体居中
+        let dSx = 0, dSy = 0;
+        if (b1x - b0x >= game.viewW) {
+          if (s0.x + b0x > 0) dSx = -(s0.x + b0x);                       // 左缘露空 → 视口贴地图左缘
+          else if (s0.x + b1x < game.viewW) dSx = game.viewW - (s0.x + b1x);
+        } else dSx = (game.viewW - 2 * s0.x - b0x - b1x) / 2;
+        if (b1y - b0y >= game.viewH) {
+          if (s0.y + b0y > 0) dSy = -(s0.y + b0y);
+          else if (s0.y + b1y < game.viewH) dSy = game.viewH - (s0.y + b1y);
+        } else dSy = (game.viewH - 2 * s0.y - b0y - b1y) / 2;
+        // 屏幕平移 dS = (Δx·Kx + Δz·Kz)（相机目标移动 Δ 时全体屏幕点反向移动）
+        const det = Kx.x * Kz.y - Kz.x * Kx.y;
+        let dxT = 0, dzT = 0;
+        if (Math.abs(det) > 1e-9 && (dSx !== 0 || dSy !== 0)) {
+          dxT = (dSx * Kz.y - dSy * Kz.x) / det;
+          dzT = (Kx.x * dSy - Kx.y * dSx) / det;
+        }
+        tmpV.set(tx0 + dxT, 0, tz0 + dzT);
+        camera.position.copy(tmpV).addScaledVector(camDir, 200);
+        camera.lookAt(tmpV);
+        report.camDebug = { s0x: s0.x.toFixed(0), s0y: s0.y.toFixed(0),
+          bbox: [b0x.toFixed(0), b1x.toFixed(0), b0y.toFixed(0), b1y.toFixed(0)],
+          dS: [dSx.toFixed(0), dSy.toFixed(0)], dT: [dxT.toFixed(2), dzT.toFixed(2)],
+          Kx: [Kx.x.toFixed(1), Kx.y.toFixed(1)], Kz: [Kz.x.toFixed(1), Kz.y.toFixed(1)] };
       }
       if (game.input.viewMapper !== viewMapper3d) game.input.setViewMapper(viewMapper3d);
 
-      /* 3D 视野供数：小地图常驻 + 真实可见区四边形（屏幕四角落地逆投影） */
+      /* 3D 视野供数：小地图常驻；视野四边形按用户要求隐藏（2D 原版保留） */
       game.forceMinimap = true;
-      game.viewWorldRect = [
-        viewMapper3d(0, 0), viewMapper3d(game.viewW, 0),
-        viewMapper3d(game.viewW, game.viewH), viewMapper3d(0, game.viewH)
-      ];
+      game.minimapHideViewRect = true;
 
       /* 坦克（实例复用：坦克数动态增减，池跟随 game.tanks） */
       if (protoRoot && !menu) {
