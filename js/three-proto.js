@@ -374,7 +374,7 @@ import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js'
       return { root: inst, turret: inst.getObjectByName('TurretPivot'), muzzle: inst.getObjectByName('MuzzleBrake'), shadow };
     }
 
-    new GLTFLoader().load('blender-3d/exports/toy_tank.glb',
+    new GLTFLoader().load('blender-3d/exports/toy_tank.glb?v=20261025b',
       g => { protoRoot = g.scene; report.glb = 'ok'; refreshStatusPanel(); },
       undefined, err => { report.glb = 'fail'; report.errors.push('GLB: ' + err); refreshStatusPanel(); });
 

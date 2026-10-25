@@ -14,8 +14,23 @@
 <script type="importmap">
 { "imports": { "three": "./vendor/three.module.js", "three/addons/": "./vendor/addons/" } }
 </script>
+<script>
+/* 致命错误横幅：任何未捕获 JS 错误立即显示（避免"神秘卡死"） */
+(function () {
+  function show(msg) {
+    var el = document.getElementById('fatal-banner');
+    if (!el) return;
+    el.hidden = false;
+    el.textContent = '页面脚本错误：' + msg + '（按 Ctrl+F5 强制刷新；若反复出现请截图反馈）';
+  }
+  window.addEventListener('error', function (e) { show(e.message); }, true);
+  window.addEventListener('unhandledrejection', function (e) { show(String(e.reason)); }, true);
+})();
+</script>
 </head>
 <body>
+  <div id="fatal-banner" hidden
+    style="position:fixed;top:0;left:0;right:0;z-index:999;background:#7a1f1f;color:#ffd7d7;font:13px/1.5 monospace;padding:0.5em 1em;"></div>
 <div id="app">
   <div id="stage">
     <!-- WebGL 层：3D 战场（js/three-proto.js）；加载失败时仅 2D 层运行 -->
@@ -150,29 +165,29 @@
   </div>
 </div>
 
-<script src="js/config.js"></script>
-<script src="js/mapsize.js"></script>
-<script src="js/utils.js"></script>
-<script src="js/isoview.js"></script>
-<script src="js/physics.js"></script>
-<script src="js/maze.js"></script>
-<script src="js/bullet.js"></script>
-<script src="js/tank.js"></script>
-<script src="js/effects.js"></script>
-<script src="js/pickup.js"></script>
-<script src="js/pickup-icons.js"></script>
-<script src="js/pickup-demos.js"></script>
-<script src="js/ai.js"></script>
-<script src="js/control.js"></script>
-<script src="js/game.js"></script>
-<script src="js/ui.js"></script>
-<script src="js/pickup-legend.js"></script>
-<script src="js/main.js"></script>
+<script src="js/config.js?v=20261025b"></script>
+<script src="js/mapsize.js?v=20261025b"></script>
+<script src="js/utils.js?v=20261025b"></script>
+<script src="js/isoview.js?v=20261025b"></script>
+<script src="js/physics.js?v=20261025b"></script>
+<script src="js/maze.js?v=20261025b"></script>
+<script src="js/bullet.js?v=20261025b"></script>
+<script src="js/tank.js?v=20261025b"></script>
+<script src="js/effects.js?v=20261025b"></script>
+<script src="js/pickup.js?v=20261025b"></script>
+<script src="js/pickup-icons.js?v=20261025b"></script>
+<script src="js/pickup-demos.js?v=20261025b"></script>
+<script src="js/ai.js?v=20261025b"></script>
+<script src="js/control.js?v=20261025b"></script>
+<script src="js/game.js?v=20261025b"></script>
+<script src="js/ui.js?v=20261025b"></script>
+<script src="js/pickup-legend.js?v=20261025b"></script>
+<script src="js/main.js?v=20261025b"></script>
 
 <!-- 3D 接入验收驱动：仅 ?itest=1 时生效（无头自动化用） -->
 <script src="tests/integration-3d.page.js"></script>
 
 <!-- 3D 视图层（模块）：http(s) 下生效并接管世界渲染；file:// 下加载失败 → 原版渲染 -->
-<script type="module" src="js/three-proto.js"></script>
+<script type="module" src="js/three-proto.js?v=20261025b"></script>
 </body>
 </html>
