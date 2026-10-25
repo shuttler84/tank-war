@@ -31,7 +31,7 @@ const tmp = path.join(root, 'node-tmp');
 fs.mkdirSync(tmp, { recursive: true });
 
 const SCENARIOS = [
-  { pose: 'overview' }, { pose: 'menu' }, { pose: 'move' }, { pose: 'turret' }, { pose: 'muzzle' }, { pose: 'laser' }, { pose: 'wall' }, { pose: 'bounce' }
+  { pose: 'overview' }, { pose: 'menu' }, { pose: 'move' }, { pose: 'turret' }, { pose: 'muzzle' }, { pose: 'laser' }, { pose: 'shield' }, { pose: 'death' }, { pose: 'wall' }, { pose: 'bounce' }
 ];
 
 function edge(args, tag) {
@@ -45,7 +45,7 @@ function edge(args, tag) {
     '--headless', '--enable-unsafe-swiftshader', '--hide-scrollbars',
     '--no-first-run', '--no-default-browser-check',
     '--user-data-dir=' + path.join(tmp, 'profile-' + tag),
-    '--window-size=1440,900', '--virtual-time-budget=14000'
+    '--window-size=1440,900', '--virtual-time-budget=16000'   // 与 rollout 一致；14s 在多实例负载下偶发超时
   ].concat(args), { timeout: 90000, encoding: 'utf8', maxBuffer: 32e6 });
 }
 
@@ -56,7 +56,7 @@ for (const sc of SCENARIOS) {
   const url = BASE + ENTRY + '?itest=1&pose=' + sc.pose;
   const png = path.join(outDir, 'integration-' + sc.pose + '.png');
   try {
-    edge(['--screenshot=' + png, url], 'shot-' + sc.pose);
+    edge(['--screenshot=' + png, url + '&shot=1'], 'shot-' + sc.pose);   // 截图走轻量摆位（虚拟时间预算内完成）
   } catch (e) {
     console.log('[失败] ' + sc.pose + ' 截图执行异常: ' + String(e.message).split('\n')[0]);
     failedTotal++;

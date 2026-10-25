@@ -371,10 +371,27 @@ import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js'
       shadow.position.y = 0.02;
       scene.add(shadow);
       scene.add(inst);
-      return { root: inst, turret: inst.getObjectByName('TurretPivot'), muzzle: inst.getObjectByName('MuzzleBrake'), shadow };
+      // 护盾泡：对应 2D 的复活保护/能量护盾光环（invuln>0）
+      // NormalBlending：加法混合在浅亮地板上会饱和不可见；普通混合明暗背景都可辨
+      const shield = new THREE.Mesh(
+        new THREE.SphereGeometry(2.35, 24, 16),
+        new THREE.MeshBasicMaterial({ color: 0x45d0ff, transparent: true, opacity: 0.40,
+          depthWrite: false, side: THREE.DoubleSide }));
+      shield.position.y = 0.95;
+      shield.visible = false;
+      inst.add(shield);
+      // 亮色实体光环（对应 2D 描边圆环；俯视角下呈清晰椭圆，任何背景可辨）
+      const shieldRing = new THREE.Mesh(
+        new THREE.TorusGeometry(2.55, 0.22, 8, 48),
+        new THREE.MeshBasicMaterial({ color: 0x8ce8ff }));
+      shieldRing.rotation.x = Math.PI / 2;
+      shieldRing.position.y = 0.35;
+      shieldRing.visible = false;
+      inst.add(shieldRing);
+      return { root: inst, turret: inst.getObjectByName('TurretPivot'), muzzle: inst.getObjectByName('MuzzleBrake'), shadow, shield, shieldRing };
     }
 
-    new GLTFLoader().load('blender-3d/exports/toy_tank.glb?v=20261025b',
+    new GLTFLoader().load('blender-3d/exports/toy_tank.glb?v=20261025c',
       g => { protoRoot = g.scene; report.glb = 'ok'; refreshStatusPanel(); },
       undefined, err => { report.glb = 'fail'; report.errors.push('GLB: ' + err); refreshStatusPanel(); });
 
@@ -472,6 +489,26 @@ import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js'
     }
 
     /* ---------- 测试快照 API（读渲染层真实状态，供自动化验收） ---------- */
+
+    /** 护盾网格诊断（自动化用）：父子关系/世界坐标/在场景中 */
+    report.shieldDebug = function (i) {
+      const inst = tankPool[i];
+      if (!inst || !inst.shield) return null;
+      const v = new THREE.Vector3();
+      inst.shield.getWorldPosition(v);
+      const vr = new THREE.Vector3();
+      inst.shieldRing.getWorldPosition(vr);
+      return {
+        visible: inst.shield.visible,
+        rootVisible: inst.root.visible,
+        parentIsRoot: inst.shield.parent === inst.root,
+        world: [ +v.x.toFixed(2), +v.y.toFixed(2), +v.z.toFixed(2) ],
+        inScene: scene.children.includes(inst.root),
+        rootPos: [ +inst.root.position.x.toFixed(2), +inst.root.position.y.toFixed(2), +inst.root.position.z.toFixed(2) ],
+        ring: { exists: !!inst.shieldRing, visible: inst.shieldRing ? inst.shieldRing.visible : null,
+          world: [ +vr.x.toFixed(2), +vr.y.toFixed(2), +vr.z.toFixed(2) ] }
+      };
+    };
 
     /** 世界坐标 → 屏幕像素（3D 相机投影；缩放/取景无关的瞄准基准） */
     report.project = function (wx, wy) {
@@ -577,8 +614,10 @@ import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js'
           camera.updateProjectionMatrix();
           renderer.setSize(game.viewW, game.viewH, false);
         }
-        const tx0 = pl && pl.alive ? pl.x / PX : maze.width / PX / 2;
-        const tz0 = pl && pl.alive ? pl.y / PX : maze.height / PX / 2;
+        /* 死亡期间视角停在死亡位置（与 2D 行为一致：跟随坦克对象——尸体
+         * 位置直到重生才变），不得跳地图中心（曾因此死亡瞬间画面突兀跳转） */
+        const tx0 = pl ? pl.x / PX : maze.width / PX / 2;
+        const tz0 = pl ? pl.y / PX : maze.height / PX / 2;
         // 先对准玩家（菜单对准地图中心），探针求 K 矩阵
         tmpV.set(tx0, 0, tz0);
         camera.position.copy(tmpV).addScaledVector(camDir, 200);
@@ -644,6 +683,19 @@ import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js'
         for (let i = 0; i < game.tanks.length; i++) {
           const tank = game.tanks[i], inst = tankPool[i];
           inst.root.visible = inst.shadow.visible = tank.alive;
+          /* 护盾/复活保护可视化：门控在 alive 检查前，死亡时显式熄灭（无残留） */
+          if (inst.shield) {
+            const on = tank.alive && tank.invuln > 0;
+            inst.shield.visible = on;
+            if (inst.shieldRing) inst.shieldRing.visible = on;
+            if (on) {
+              const pulse = 0.5 + 0.5 * Math.sin(tank.invuln * 9);
+              inst.shield.material.opacity = 0.42 + 0.22 * pulse;
+              const k = 1 + 0.06 * pulse;
+              inst.shield.scale.set(k, k, k);
+              if (inst.shieldRing) inst.shieldRing.scale.set(k, k, 1);
+            }
+          }
           if (!tank.alive) continue;
           inst.root.position.set(tank.x / PX, 0, tank.y / PX);
           inst.root.rotation.y = Math.PI / 2 - tank.angle;
@@ -657,6 +709,7 @@ import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js'
         }
       }
       report.tanks = menu ? 0 : game.tanks.length;
+      report.shields = menu ? 0 : tankPool.reduce(function (n, i) { return n + (i.shield && i.shield.visible && i.root.visible ? 1 : 0); }, 0);   // 计数基于护盾泡
 
       /* 子弹 */
       bulletPool.hideAll();

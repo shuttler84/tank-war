@@ -49,6 +49,7 @@
   function run() {
     const game = window.__tankGame;
     const P3 = window.__proto3d;
+    const SHOT = q.has('shot');   // 截图模式：跳过断言段（虚拟时间预算内完成摆位）
     const iso = game.iso;
     const TAU = Math.PI * 2;
 
@@ -104,7 +105,11 @@
       return game.bullets[game.bullets.length - 1];
     }
 
-    /* ---------- 开局 ---------- */
+    let spot = null;   // run 级：applyPose 需要（try 块内赋值）
+
+    /* ---------- 开局（段落断言包 try：任何异常不阻断截图摆位） ---------- */
+    try {
+      if (SHOT) throw { skip: true };
     game.startMatch({ mapId: MAP, enemies: 2, difficulty: 'normal' });
     everyoneInvuln();
     game.render();
@@ -113,7 +118,7 @@
     check('F-预备 | 模型多实例复用（3 坦克 = 同一 GLB 克隆）', snapshot().tanks.length === 3,
       'tanks=' + snapshot().tanks.length);
 
-    const spot = openSpot(130)
+    spot = openSpot(130)
       || (() => { results.push('FAIL | 预备 | 未找到可站立的开阔点'); return null; })();
     if (!spot) { finish(); return; }
     game.player.x = spot.x; game.player.y = spot.y; game.player.speed = 0;
@@ -611,6 +616,59 @@
           'errors=' + (P3.errors || []).length
           + ((P3.errors && P3.errors.length) ? ' 首条=' + String(P3.errors[0]).slice(0, 120) : ''));
       }
+
+      /* ---------- I 死亡视角 + 护盾可视化（用户实测反馈） ---------- */
+      {
+        game.restart();
+        game.pickups.length = 0; game.pickupTimer = 9999; game.bullets.length = 0;
+        // 敌方全部静默（防碰撞推挤玩家/开火干扰），只考察玩家
+        for (const t of game.tanks) if (!t.isPlayer) t.alive = false;
+        const p = game.player;
+        const dcx = game.viewW / 2, dcy = game.viewH / 2;
+
+        /* ① 死亡期间视角停在死亡位置（不跳地图中心） */
+        p.x = 300; p.y = 300; p.speed = 0; p.invuln = 0;
+        game.camera.follow(p.x, p.y, game.maze.width, game.maze.height);
+        if (game.isoActive) game.followIsoCamera();
+        game.render();
+        const pre = P3.project(p.x, p.y);
+        game.onBulletHit({ ownerId: 99, cluster: false, generation: 2 }, p);   // 击杀玩家
+        const dead0 = !p.alive && game.respawnTimer > 0;
+        for (let i = 0; i < 40; i++) game.update(1 / 60);   // 倒计时中段（<1.4s 不重生）
+        game.render();
+        const mid = P3.project(300, 300);
+        const driftMid = Math.hypot(mid.x - pre.x, mid.y - pre.y);
+        check('I-死亡 | 死亡期间视角停在死亡位置（漂移 ≤24px）', dead0 && driftMid <= 24,
+          'dead=' + dead0 + ' 漂移=' + driftMid.toFixed(1) + 'px');
+        for (let i = 0; i < 160; i++) game.update(1 / 60);  // 跨过重生（延迟1.4s+结算余量）
+        game.render();
+        const post = P3.project(p.x, p.y);
+        // 相机跟随+边缘钳制：出生点贴边时玩家合法偏离中心（拉近视野下更明显），
+        // 正确判据是"玩家在画面内"（跟随不死锁在死亡点/地图中心）
+        const onScreen = Math.min(post.x, game.viewW - post.x, post.y, game.viewH - post.y);
+        const moved = Math.hypot(p.x - 300, p.y - 300) > 50 || (post.x - pre.x) === 0;
+        check('I-死亡 | 重生后视角随新出生点（玩家在画面内）',
+          p.alive && onScreen >= 16 && moved,
+          'alive=' + p.alive + ' 屏幕留白=' + onScreen.toFixed(0) + 'px');
+
+        /* ② 护盾可视化：invuln>0 有护盾泡，归零消失（敌已静默，计数只反映玩家） */
+        p.invuln = 0; game.render();
+        const none = P3.shields;
+        p.applyPickup('shield'); game.render();
+        const on = P3.shields;
+        check('I-护盾 | 拾取能量护盾后坦克出现护盾泡（3D 层可见）', none === 0 && on >= 1,
+          '拾取前=' + none + ' 拾取后=' + on);
+        for (let i = 0; i < 60; i++) game.update(1 / 60);   // 持续期间仍可见
+        game.render();
+        check('I-护盾 | 护盾持续期间保持可见', P3.shields >= 1, 'shields=' + P3.shields);
+        p.invuln = 0; game.render();
+        check('I-护盾 | 护盾到期消失', P3.shields === 0, 'shields=' + P3.shields);
+      }
+    }
+
+    } catch (e) {
+      if (e && e.skip) results.push('INFO | shot 模式：跳过断言段');
+      else { failed++; results.push('FAIL | 段异常 | ' + (e && e.message ? e.message : e)); }
     }
 
     /* ---------- 截图摆位（确定性：摆位 → 冻结逻辑 → 持续重绘） ---------- */
@@ -640,6 +698,8 @@
         return;
       }
       game.startMatch({ mapId: MAP, enemies: 2, difficulty: 'normal' });
+      if (!spot) spot = openSpot(130)
+        || { x: game.maze.width / 2, y: game.maze.height / 2 };   // shot 模式：段落未跑
       // 摆位稳定性约定（与 A–E 段一致）：清道具/全员无敌/重置武器，
       // 避免随机拾取把 fire() 换成激光（炮口摆位将无炮弹）、敌方流弹击毁坦克
       game.pickups.length = 0; game.pickupTimer = 9999;
@@ -661,6 +721,38 @@
         aimMouseAt(p.x + Math.cos(-0.5) * 60, p.y + Math.sin(-0.5) * 60);
         game.update(1 / 60);
         fireOne(-0.5);
+      } else if (pose === 'shield') {
+        p.angle = p.aimAngle = -0.5;
+        aimMouseAt(p.x + Math.cos(-0.5) * 60, p.y + Math.sin(-0.5) * 60);
+        for (const t of game.tanks) if (!t.isPlayer) t.alive = false;  // 只保留玩家（护盾特写）
+        p.applyPickup('shield'); p.invuln = 6;             // 固定 6s 便于截图
+        for (let s = 0; s < 6; s++) game.update(1 / 60);
+        game.render();
+        const scr = P3.project(p.x, p.y);
+        let px = 'n/a';
+        try {
+          const glc = document.getElementById('gl');
+          const sc2 = document.createElement('canvas'); sc2.width = 1; sc2.height = 1;
+          const sctx = sc2.getContext('2d');
+          const pts = [[0, -34, '上'], [-26, -8, '左'], [26, -8, '右'], [0, 18, '下'], [60, -60, '远处对照']];
+          px = pts.map(function (pt) {
+            sctx.drawImage(glc, scr.x + pt[0] - 2, scr.y + pt[1] - 2, 4, 4, 0, 0, 1, 1);
+            const d = sctx.getImageData(0, 0, 1, 1).data;
+            return pt[2] + '=rgb(' + d[0] + ',' + d[1] + ',' + d[2] + ')';
+          }).join(' ');
+        } catch (e2) { px = 'err ' + e2.message; }
+        const dbg = P3.shieldDebug ? P3.shieldDebug(0) : null;
+        results.push('INFO | shield-dbg0 ' + JSON.stringify(dbg));
+        results.push('INFO | shield-diag invuln=' + p.invuln.toFixed(2)
+          + ' shields=' + P3.shields
+          + ' playerScreen=(' + scr.x.toFixed(0) + ',' + scr.y.toFixed(0) + ')'
+          + ' bubbleTopPx=' + px);
+      } else if (pose === 'death') {
+        p.x = spot.x; p.y = spot.y;
+        game.camera.follow(p.x, p.y, game.maze.width, game.maze.height);
+        if (game.isoActive) game.followIsoCamera();
+        game.onBulletHit({ ownerId: 99, cluster: false, generation: 2 }, p);
+        for (let s = 0; s < 30; s++) game.update(1 / 60);  // 倒计时中段定格
       } else if (pose === 'laser') {
         p.angle = p.aimAngle = -0.35;
         aimMouseAt(p.x + Math.cos(-0.35) * 60, p.y + Math.sin(-0.35) * 60);
@@ -700,6 +792,7 @@
     && window.__tankGame.state === 'menu', () => {
     try { run(); }
     catch (e) {
+      failed++;
       results.push('FAIL | 驱动异常 | ' + (e && e.stack ? e.stack.split('\n').slice(0, 2).join(' ') : e));
       finish();
     }
