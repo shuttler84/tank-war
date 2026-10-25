@@ -1,0 +1,685 @@
+/* =========================================================
+ * 坦克动荡：本地版 - 全息指挥终端主题
+ * 配色 token 与 js/config.js 的 CONFIG.THEME 保持同源；
+ * 覆盖层字号由 JS 按视口设置（clamp 11.5~17.5px），组件全部用 em。
+ * ========================================================= */
+
+:root {
+  --bg-deep: #07111B;
+  --bg-panel: #102638;
+  --panel-alpha: rgba(12, 27, 41, 0.86);
+  --border: #1D526A;
+  --border-dim: rgba(29, 82, 106, 0.55);
+  --cyan: #38D8F5;
+  --cyan-soft: rgba(56, 216, 245, 0.55);
+  --cyan-faint: rgba(56, 216, 245, 0.16);
+  --text: #E4F3FA;
+  --text-dim: #91B2C3;
+  --text-faint: rgba(145, 178, 195, 0.55);
+  --orange: #FF9D45;
+  --orange-soft: rgba(255, 157, 69, 0.14);
+  --ok: #58C93E;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  background: var(--bg-deep);
+  font-family: "Microsoft YaHei", "PingFang SC", "Hiragino Sans GB", system-ui, -apple-system, sans-serif;
+  color: var(--text);
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* 全屏舞台：固定铺满浏览器可视区域 */
+#app {
+  width: 100%;
+  height: 100%;
+}
+
+#stage {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg-deep);
+}
+
+#game { display: block; width: 100%; height: 100%; cursor: none; }
+
+/* ---------- 覆盖层 ---------- */
+
+.overlay {
+  position: absolute;
+  inset: 0;
+  font-size: 16px;   /* 由 JS 按视口尺寸动态设置 */
+  pointer-events: none;
+}
+
+.screen {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  pointer-events: auto;
+  animation: fadeIn 0.16s ease;
+}
+
+.screen[hidden] { display: none; }
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* 轻量扫描线（纯 CSS，极低透明度） */
+.screen::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    0deg,
+    rgba(56, 216, 245, 0.03) 0 1px,
+    transparent 1px 3px
+  );
+  z-index: 5;
+}
+
+/* ---------- 主菜单：全视口指挥终端 ---------- */
+
+.screen-menu {
+  background: linear-gradient(160deg,
+    rgba(7, 17, 27, 0.86) 0%,
+    rgba(7, 17, 27, 0.62) 42%,
+    rgba(10, 26, 40, 0.80) 100%);
+}
+
+/* 背景网格装饰 */
+.screen-menu::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(rgba(29, 82, 106, 0.16) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(29, 82, 106, 0.16) 1px, transparent 1px);
+  background-size: 3.4em 3.4em;
+  mask-image: radial-gradient(ellipse at 50% 40%, rgba(0,0,0,0.5), transparent 78%);
+  -webkit-mask-image: radial-gradient(ellipse at 50% 40%, rgba(0,0,0,0.5), transparent 78%);
+}
+
+.topbar {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1em;
+  padding: 0.9em 1.6em 0.7em;
+  border-bottom: 1px solid var(--border-dim);
+  background: linear-gradient(180deg, rgba(7, 17, 27, 0.72), rgba(7, 17, 27, 0.25));
+}
+
+.brand h1 {
+  margin: 0;
+  font-size: 1.5em;
+  letter-spacing: 0.10em;
+  font-weight: 800;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  gap: 0.45em;
+  text-shadow: 0 0 14px rgba(56, 216, 245, 0.35);
+}
+
+.brand h1 span {
+  font-size: 0.44em;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  color: var(--cyan);
+  background: var(--cyan-faint);
+  border: 1px solid var(--border);
+  padding: 0.32em 0.6em;
+  border-radius: 0.35em;
+}
+
+.tagline {
+  margin: 0.28em 0 0;
+  font-size: 0.68em;
+  color: var(--text-dim);
+  letter-spacing: 0.30em;
+}
+
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.6em;
+}
+
+.version {
+  font-size: 0.72em;
+  color: var(--text-faint);
+  letter-spacing: 0.08em;
+}
+
+/* ---------- 主体：左情报 / 右地图库 ---------- */
+
+.menu-body {
+  position: relative;
+  z-index: 2;
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(19em, 24em) minmax(0, 1fr);
+  gap: 1.1em;
+  padding: 1.1em 1.6em;
+}
+
+.menu-side {
+  display: flex;
+  flex-direction: column;
+  gap: 0.8em;
+  min-height: 0;
+  overflow: auto;
+  padding-right: 0.2em;
+}
+
+.holo-panel {
+  background: var(--panel-alpha);
+  border: 1px solid var(--border);
+  border-radius: 0.6em;
+  padding: 0.85em 1em;
+  box-shadow: inset 0 0 1.4em rgba(12, 40, 62, 0.5), 0 0.4em 1.4em rgba(0, 0, 0, 0.35);
+  position: relative;
+}
+
+.holo-panel::before {
+  content: '';
+  position: absolute;
+  top: -1px; left: 0.9em;
+  width: 3.2em; height: 2px;
+  background: var(--cyan-soft);
+  border-radius: 1px;
+}
+
+/* 当前地图情报 */
+.map-info {
+  font-size: 0.82em;
+  line-height: 1.6;
+  color: var(--text-dim);
+}
+
+.map-info b {
+  color: var(--cyan);
+  font-size: 1.12em;
+  margin-right: 0.4em;
+}
+
+.map-info .map-meta {
+  color: var(--text-faint);
+  margin-left: 0.3em;
+}
+
+.map-info .map-hint {
+  display: block;
+  margin-top: 0.35em;
+  color: var(--text-faint);
+  font-size: 0.9em;
+}
+
+/* 对局配置 */
+.settings-panel { padding-bottom: 0.5em; }
+
+.opt-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.6em;
+  margin: 0.3em 0;
+  padding: 0.4em 0;
+  border-top: 1px solid rgba(29, 82, 106, 0.28);
+}
+
+.opt-row:first-of-type { border-top: none; }
+
+.opt-label {
+  flex: none;
+  width: 2.9em;
+  font-size: 0.88em;
+  font-weight: 700;
+  color: var(--text-dim);
+  letter-spacing: 0.1em;
+}
+
+.opt-choices { display: flex; flex-wrap: wrap; gap: 0.4em; }
+
+.choice {
+  font: inherit;
+  font-size: 0.84em;
+  padding: 0.4em 0.8em;
+  border-radius: 0.45em;
+  border: 1px solid var(--border-dim);
+  background: rgba(12, 27, 41, 0.65);
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease,
+    box-shadow 0.12s ease, transform 0.06s ease;
+}
+
+.choice:hover {
+  background: var(--cyan-faint);
+  border-color: var(--cyan-soft);
+  color: var(--text);
+}
+
+.choice:active { transform: translateY(1px); }
+
+.choice:disabled,
+.choice.disabled {
+  opacity: 0.32;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.choice.active {
+  background: rgba(56, 216, 245, 0.16);
+  border-color: var(--cyan);
+  color: var(--text);
+  font-weight: 700;
+  box-shadow: 0 0 0.7em rgba(56, 216, 245, 0.28), inset 0 0 0.6em rgba(56, 216, 245, 0.12);
+}
+
+.opt-note {
+  display: block;
+  font-size: 0.7em;
+  color: var(--text-faint);
+  margin: -0.2em 0 0.35em 3.5em;
+}
+
+.settings-summary {
+  font-size: 0.74em;
+  color: var(--text-dim);
+  letter-spacing: 0.08em;
+  padding: 0 0.2em;
+}
+
+.settings-summary b { color: var(--cyan); font-weight: 700; }
+
+/* ---------- 主按钮 ---------- */
+
+.primary {
+  display: block;
+  width: 100%;
+  margin-top: 0.15em;
+  padding: 0.72em 1em;
+  font: inherit;
+  font-size: 1em;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  color: #1A0E02;
+  background: linear-gradient(180deg, #FFB25E, #F07E1E);
+  border: 1px solid rgba(255, 157, 69, 0.75);
+  border-radius: 0.5em;
+  cursor: pointer;
+  box-shadow: 0 0 1.2em rgba(255, 157, 69, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.28);
+  transition: filter 0.12s ease, transform 0.06s ease, box-shadow 0.12s ease;
+}
+
+.primary:hover {
+  filter: brightness(1.08);
+  box-shadow: 0 0 1.8em rgba(255, 157, 69, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.28);
+}
+
+.primary:active { transform: translateY(1px); }
+
+.ghost {
+  font: inherit;
+  font-size: 0.86em;
+  font-weight: 700;
+  color: var(--text-dim);
+  background: rgba(12, 27, 41, 0.65);
+  border: 1px solid var(--border-dim);
+  border-radius: 0.45em;
+  cursor: pointer;
+  padding: 0.5em 1em;
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+}
+
+.ghost:hover {
+  background: var(--cyan-faint);
+  border-color: var(--cyan-soft);
+  color: var(--text);
+}
+
+.ghost:active { transform: translateY(1px); }
+
+.ghost.slim { padding: 0.42em 0.85em; font-size: 0.78em; }
+
+.btn-col { display: flex; flex-direction: column; gap: 0.55em; margin-top: 0.9em; }
+
+/* ---------- 地图选择卡片 ---------- */
+
+.map-select {
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1em;
+  padding: 0.1em 0.2em 0.4em 0;
+}
+
+.map-group { flex: none; }
+
+.group-title {
+  margin: 0 0 0.55em;
+  font-size: 0.86em;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  color: var(--cyan);
+  display: flex;
+  align-items: baseline;
+  gap: 0.8em;
+}
+
+.group-title::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, var(--border), transparent);
+}
+
+.group-title em {
+  font-style: normal;
+  font-size: 0.82em;
+  font-weight: 400;
+  letter-spacing: 0.06em;
+  color: var(--text-faint);
+}
+
+.map-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(11.5em, 1fr));
+  gap: 0.7em;
+}
+
+.map-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35em;
+  padding: 0.5em 0.6em 0.6em;
+  text-align: left;
+  border-radius: 0.55em;
+  border: 1px solid var(--border-dim);
+  background: var(--panel-alpha);
+  overflow: hidden;
+}
+
+.map-card:hover {
+  border-color: var(--cyan-soft);
+  box-shadow: 0 0 0.9em rgba(56, 216, 245, 0.18);
+}
+
+.map-card .thumb {
+  display: block;
+  aspect-ratio: 3 / 2;
+  border-radius: 0.35em;
+  overflow: hidden;
+  background: #0C1B29;
+  border: 1px solid rgba(29, 82, 106, 0.45);
+}
+
+.map-card .thumb img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.map-card .card-name {
+  font-size: 0.86em;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: 0.05em;
+}
+
+.map-card .card-meta {
+  font-size: 0.66em;
+  color: var(--text-faint);
+  letter-spacing: 0.05em;
+}
+
+.map-card .card-tag {
+  font-size: 0.68em;
+  color: var(--text-dim);
+  line-height: 1.4;
+}
+
+.map-card.active {
+  border-color: var(--cyan);
+  box-shadow: 0 0 1em rgba(56, 216, 245, 0.30), inset 0 0 0.8em rgba(56, 216, 245, 0.10);
+}
+
+.map-card.active .card-name { color: var(--cyan); }
+
+.map-card.active::after {
+  content: '◆';
+  position: absolute;
+  top: 0.45em; right: 0.55em;
+  font-size: 0.7em;
+  color: var(--cyan);
+  text-shadow: 0 0 0.5em rgba(56, 216, 245, 0.8);
+}
+
+/* ---------- 底部提示条 ---------- */
+
+.tips {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5em 1.6em;
+  padding: 0.65em 1.6em 0.85em;
+  border-top: 1px solid var(--border-dim);
+  background: linear-gradient(0deg, rgba(7, 17, 27, 0.78), rgba(7, 17, 27, 0.30));
+}
+
+.tip {
+  display: flex;
+  align-items: baseline;
+  gap: 0.55em;
+  font-size: 0.74em;
+}
+
+.tip b {
+  flex: none;
+  color: var(--cyan);
+  font-weight: 700;
+}
+
+.tip span { color: var(--text-faint); }
+
+/* ---------- 战斗 HUD 暂停按钮（DOM） ---------- */
+
+.hud-pause {
+  position: absolute;
+  top: 0.85em;
+  right: 1em;
+  z-index: 6;
+  font: inherit;
+  font-size: 0.8em;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: var(--text-dim);
+  background: var(--panel-alpha);
+  border: 1px solid var(--border-dim);
+  border-radius: 0.45em;
+  padding: 0.45em 0.9em;
+  cursor: pointer;
+  pointer-events: auto;
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+}
+
+.hud-pause:hover {
+  background: var(--cyan-faint);
+  border-color: var(--cyan);
+  color: var(--text);
+}
+
+.hud-pause[hidden] { display: none; }
+
+/* ---------- 暂停 / 结算 ---------- */
+
+.screen-modal {
+  align-items: center;
+  justify-content: center;
+  padding: 1.1em;
+  background: rgba(7, 17, 27, 0.78);
+}
+
+.panel {
+  width: min(26em, 94%);
+  max-height: 100%;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 1.25em 1.5em 1.15em;
+  background: linear-gradient(170deg, rgba(16, 38, 56, 0.96), rgba(10, 24, 38, 0.96));
+  border: 1px solid var(--border);
+  border-radius: 0.8em;
+  box-shadow: 0 1.1em 2.8em rgba(0, 0, 0, 0.55), inset 0 0 1.6em rgba(12, 40, 62, 0.55);
+  text-align: center;
+  position: relative;
+}
+
+.panel::before {
+  content: '';
+  position: absolute;
+  top: -1px; left: 50%;
+  transform: translateX(-50%);
+  width: 5em; height: 2px;
+  background: var(--cyan-soft);
+  border-radius: 1px;
+}
+
+.screen-title {
+  margin: 0.15em 0 0.35em;
+  font-size: 1.45em;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  color: var(--text);
+}
+
+.muted {
+  margin: 0 0 0.9em;
+  font-size: 0.84em;
+  color: var(--text-dim);
+  line-height: 1.6;
+}
+
+.result-icon {
+  font-size: 2.4em;
+  line-height: 1;
+  margin-top: 0.1em;
+}
+
+.result-icon.win { color: var(--cyan); text-shadow: 0 0 0.4em rgba(56, 216, 245, 0.5); }
+.result-icon.lose { color: var(--orange); }
+
+.stats {
+  display: flex;
+  justify-content: space-around;
+  gap: 0.4em;
+  margin: 0.4em 0 0.2em;
+  padding: 0.75em 0.4em;
+  background: rgba(7, 17, 27, 0.55);
+  border: 1px solid var(--border-dim);
+  border-radius: 0.55em;
+}
+
+.stat { display: flex; flex-direction: column; gap: 0.15em; }
+
+.stat span {
+  font-size: 1.3em;
+  font-weight: 800;
+  color: var(--cyan);
+  font-variant-numeric: tabular-nums;
+}
+
+.stat em {
+  font-style: normal;
+  font-size: 0.72em;
+  color: var(--text-faint);
+  letter-spacing: 0.14em;
+}
+
+.panel.is-win .screen-title { color: var(--cyan); }
+.panel:not(.is-win) .screen-title { color: var(--orange); }
+
+/* ---------- 滚动条 ---------- */
+
+.menu-side::-webkit-scrollbar,
+.map-select::-webkit-scrollbar,
+.panel::-webkit-scrollbar { width: 8px; height: 8px; }
+
+.menu-side::-webkit-scrollbar-thumb,
+.map-select::-webkit-scrollbar-thumb,
+.panel::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 4px;
+}
+
+.menu-side::-webkit-scrollbar-thumb:hover,
+.map-select::-webkit-scrollbar-thumb:hover,
+.panel::-webkit-scrollbar-thumb:hover { background: var(--cyan-soft); }
+
+.menu-side::-webkit-scrollbar-track,
+.map-select::-webkit-scrollbar-track,
+.panel::-webkit-scrollbar-track { background: transparent; }
+
+.menu-side, .map-select, .panel { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+
+/* ---------- 响应式 ---------- */
+
+/* 中低分辨率：压缩侧栏与间距 */
+@media (max-width: 1100px) {
+  .menu-body { grid-template-columns: minmax(17em, 21em) minmax(0, 1fr); gap: 0.8em; padding: 0.8em 1em; }
+  .map-cards { grid-template-columns: repeat(auto-fill, minmax(10.5em, 1fr)); gap: 0.55em; }
+}
+
+/* 窄窗口：单列堆叠，整体滚动（行高按内容自适应，避免按钮越界压到标题） */
+@media (max-width: 780px) {
+  .menu-body { grid-template-columns: 1fr; overflow: auto; grid-auto-rows: max-content; }
+  .menu-side { overflow: visible; }
+  .map-select { overflow: visible; }
+  .topbar { flex-wrap: wrap; }
+}
+
+/* 矮窗口：收紧纵向空间 */
+@media (max-height: 700px) {
+  .topbar { padding: 0.55em 1.2em 0.45em; }
+  .brand h1 { font-size: 1.25em; }
+  .tagline { margin-top: 0.15em; }
+  .menu-body { padding: 0.7em 1.2em; gap: 0.7em; }
+  .tips { display: none; }
+}
+
+@media (max-height: 540px) {
+  .map-card .card-tag { display: none; }
+  .group-title em { display: none; }
+}
+
+/* 尊重系统的"减少动态效果"设置（也让截图/录屏更稳定） */
+@media (prefers-reduced-motion: reduce) {
+  .screen { animation: none; }
+  .choice, .primary, .ghost, .hud-pause { transition: none; }
+}

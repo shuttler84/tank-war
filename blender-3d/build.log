@@ -1,0 +1,27 @@
+E:\Zcode项目\坦克动荡-本地版\blender-3d\scripts\build_test_asset.py:40: DeprecationWarning: 'Material.use_nodes' is expected to be removed in Blender 6.0
+  mat.use_nodes = True
+E:\Zcode项目\坦克动荡-本地版\blender-3d\scripts\build_test_asset.py:65: DeprecationWarning: 'World.use_nodes' is expected to be removed in Blender 6.0
+  world.use_nodes = True
+=== build_test_asset ===
+cube_created: TestCube
+material_created: TestOrangeMat
+camera_created: Camera
+light_and_world_ready
+Info: Saved as "test_cube.blend"
+blend_saved: E:\Zcode项目\坦克动荡-本地版\blender-3d\source\test_cube.blend 89963 bytes
+INFO Draco is available, use library at E:\SteamLibrary\steamapps\common\Blender\5.2\scripts\addons_core\io_scene_gltf2\bf_intern_draco_bridge.dll
+INFO MeshOptimizer is available, use library at E:\SteamLibrary\steamapps\common\Blender\5.2\scripts\addons_core\io_scene_gltf2\bf_intern_meshopt_bridge.dll
+11:29:05 | INFO: Starting glTF 2.0 export
+11:29:05 | INFO: Extracting primitive: Cube
+11:29:05 | INFO: Primitives created: 1
+11:29:05 | INFO: Finished glTF 2.0 export in 0.045920610427856445 s
+00:13.125  render           | Saved: 'E:\Zcode项目\坦克动荡-本地版\blender-3d\previews\test_cube_preview.png'
+
+glb_exported: E:\Zcode项目\坦克动荡-本地版\blender-3d\exports\test_cube.glb 1968 bytes
+engine_failed: BLENDER_EEVEE_NEXT TypeError('bpy_struct: item.attr = val: enum "BLENDER_EEVEE_NEXT" not found in (\'BLENDER_EEVEE\', \'BLENDER_WORKBENCH\', \'CYCLES\')')
+preview_rendered: E:\Zcode项目\坦克动荡-本地版\blender-3d\previews\test_cube_preview.png engine: BLENDER_EEVEE
+files_check: OK
+BUILD_OK
+Blender 5.2.3 LTS (hash e13b728c6880 built 2026-10-22 01:37:16)
+
+Blender quit

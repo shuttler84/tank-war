@@ -1,0 +1,18 @@
+=== verify_export ===
+target: E:\Zcode项目\坦克动荡-本地版\blender-3d\exports\test_cube.glb
+file_size: 1968 bytes
+magic: b'glTF' version: 2 declared_length: 1968
+json_meshes: 1 accessors: 4
+json_nodes_with_mesh: ['TestCube']
+json_materials: ['TestOrangeMat']
+json_cameras: 0
+11:29:28 | INFO: Data are loaded, start creating Blender stuff
+11:29:28 | INFO: Blender create Mesh node Cube
+11:29:28 | INFO: glTF import finished in 0.00s
+reimported_meshes: ['TestCube']
+reimported_total_vertices: 24
+reimported_materials: ['TestOrangeMat']
+VERIFY_OK
+Blender 5.2.3 LTS (hash e13b728c6880 built 2026-10-22 01:37:16)
+
+Blender quit
