@@ -31,7 +31,7 @@ const tmp = path.join(root, 'node-tmp');
 fs.mkdirSync(tmp, { recursive: true });
 
 const SCENARIOS = [
-  { pose: 'move' }, { pose: 'turret' }, { pose: 'muzzle' }, { pose: 'wall' }, { pose: 'bounce' }
+  { pose: 'overview' }, { pose: 'move' }, { pose: 'turret' }, { pose: 'muzzle' }, { pose: 'wall' }, { pose: 'bounce' }
 ];
 
 function edge(args, tag) {

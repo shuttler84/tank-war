@@ -381,6 +381,40 @@
       game.pause(); const paused = game.state === 'paused';
       game.resume();
       check('F-暂停 | 暂停/恢复正常', paused && game.state === 'playing', '');
+
+      /* ---------- G 地图视觉（kit 模块化） ---------- */
+      const mv = P3.mapVisual;
+      if (mv && mv.mode === 'kit') {
+        check('G-Kit | 模块件已加载并生效', mv.mode === 'kit' && mv.pieces > 0,
+          'pieces=' + mv.pieces + ' 地板=' + mv.floorTiles + ' 墙段=' + mv.runs.length);
+        // 视觉矩形 ⊆ 碰撞矩形：v.x0≥c.x0 且 v.x1≤c.x1（z 同理）。
+        // 越界量 = max(c.x0−v.x0, v.x1−c.x1, c.z0−v.z0, v.z1−c.z1)，正=突出碰撞带
+        let exc = -1e9, inset = 1e9, bad = null;
+        for (const r of mv.runs) {
+          const c = r.crash, v = r.visual;
+          const e = Math.max(c.x0 - v.x0, v.x1 - c.x1, c.z0 - v.z0, v.z1 - c.z1);
+          if (e > exc) { exc = e; bad = r; }
+          inset = Math.min(inset, v.x0 - c.x0, c.x1 - v.x1, v.z0 - c.z0, c.z1 - v.z1);
+        }
+        check('G-碰撞 | 墙体视觉 ⊆ 碰撞矩形（容差 0.03）', exc <= 0.03,
+          '最大越界=' + exc.toFixed(3) + ' 最小内缩=' + inset.toFixed(3) + ' 单位'
+          + (exc > 0.03 && bad ? ' 坏段 crash=[' + bad.crash.x0.toFixed(2) + ',' + bad.crash.z0.toFixed(2) + ','
+            + bad.crash.x1.toFixed(2) + ',' + bad.crash.z1.toFixed(2) + '] visual=[' + bad.visual.x0.toFixed(2)
+            + ',' + bad.visual.z0.toFixed(2) + ',' + bad.visual.x1.toFixed(2) + ',' + bad.visual.z1.toFixed(2)
+            + '] len=' + bad.lenPx + 'px' : ''));
+        // 墙高与现行约定一致（等距 heightZ，且厚度上限封顶）
+        const refH = game.iso.heightZ(game.maze) / 10;
+        check('G-墙高 | 高度=等距约定且 ≤ 3.74 封顶', Math.abs(mv.wallH - Math.min(refH, 3.74)) < 0.02,
+          'wallH=' + mv.wallH + ' 视觉厚=' + mv.vt + '（碰撞带 0.9）');
+        // 地板不遮挡：沉在坦克底盘之下
+        check('G-地板 | 地板低于坦克底盘（y≤0）', mv.floorY <= 0, 'floorY=' + mv.floorY);
+        // merge 生效：整张地图 1 个网格（1 draw call）
+        check('G-合并 | 全图合并为单网格', mv.meshes === 1, 'meshes=' + mv.meshes);
+        // 性能记录（信息性）
+        results.push('INFO | perf 三角=' + P3.tris + ' drawCalls=' + P3.calls + ' fps=' + P3.fps);
+      } else {
+        check('G-Kit | 模块件已加载并生效', false, 'mapVisual=' + (mv ? mv.mode : 'null') + ' kit=' + P3.kit);
+      }
     }
 
     /* ---------- 截图摆位（确定性：摆位 → 冻结逻辑 → 持续重绘） ---------- */
@@ -440,6 +474,7 @@
         aimMouseAt(p.x + Math.cos(-2.2) * 320, p.y + Math.sin(-2.2) * 320);
         for (let s = 0; s < 26; s++) game.update(1 / 60);
       }
+      if (pose === 'overview') P3.debugOverview = true;   // 全景取景（仅渲染层）
       aimMouseAt(p.x + Math.cos(p.angle) * 40, p.y + Math.sin(p.angle) * 40);
       game.update(1 / 60);
       p.invuln = 0; // 冻结前清玩家无敌（3D 层虽不画护盾环，保持状态干净）
@@ -449,7 +484,8 @@
   }
 
   waitFor(() => window.__tankGame && window.__proto3d && window.__proto3d.ready
-    && window.__proto3d.glb === 'ok' && window.__tankGame.state === 'menu', () => {
+    && window.__proto3d.glb === 'ok' && window.__proto3d.kit === 'ok'
+    && window.__tankGame.state === 'menu', () => {
     try { run(); }
     catch (e) {
       results.push('FAIL | 驱动异常 | ' + (e && e.stack ? e.stack.split('\n').slice(0, 2).join(' ') : e));

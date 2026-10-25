@@ -26,6 +26,7 @@
 
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js';
 
 (function () {
   const PX = 10;                                    // 1 three 单位 = 10 游戏像素
@@ -33,9 +34,11 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
   const ENABLED = q.get('proto3d') !== '0';
 
   const report = {
-    webgl: false, glb: 'pending', mode: ENABLED ? '3d' : 'off',
+    webgl: false, glb: 'pending', kit: 'pending', mode: ENABLED ? '3d' : 'off',
     map: '', tanks: 0, bullets: 0, fps: 0, dProjPx: null, dInputPx: null,
-    errors: [], ready: false, debugTurretOffset: parseFloat(q.get('turretdebug') || '0') * Math.PI / 180
+    errors: [], ready: false,
+    debugTurretOffset: parseFloat(q.get('turretdebug') || '0') * Math.PI / 180,
+    debugOverview: q.has('overview')               // 全景取景（仅渲染层诊断，不改玩法视角）
   };
   window.__proto3d = report;
 
@@ -58,8 +61,10 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
   function refreshStatusPanel() {
     const lines = [
       '3D 接入 · ' + report.fps + ' fps',
-      'WebGL ✓  GLB ' + report.glb + (report.glb === 'ok' ? ' ✓' : ''),
-      '地图 ' + report.map + ' · 坦克 ' + report.tanks + ' · 子弹 ' + report.bullets,
+      'WebGL ✓  GLB ' + report.glb + (report.glb === 'ok' ? ' ✓' : '')
+        + '  Kit ' + report.kit + (report.kit === 'ok' ? ' ✓' : ''),
+      '地图 ' + report.map + ' · 坦克 ' + report.tanks + ' · 子弹 ' + report.bullets
+        + (report.tris ? ' · ' + (report.tris / 1000).toFixed(0) + 'k 三角/' + report.calls + ' 次' : ''),
       'Δ投影 ' + report.dProjPx + ' px · Δ输入映射 ' + report.dInputPx + ' px'
     ];
     if (report.debugTurretOffset) lines.push('炮塔诊断偏移 ' + (report.debugTurretOffset * 180 / Math.PI).toFixed(0) + '°（不影响玩法）');
@@ -113,34 +118,178 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
     const modeEl = document.getElementById('view-mode');
     if (modeEl) modeEl.textContent = 'v2.1 · 3D 视图';
 
-    /* ---------- 地图（只读 maze.walls） ---------- */
+    /* ---------- 地图（只读 maze.walls；视觉 ⊆ 碰撞） ----------
+     * kit 模式：Kenney Modular Space Kit 模块件拼装
+     *   - template-wall(4×4.25×1) 铺墙段 / wall-detail-a 带面板细节变体 /
+     *     wall-corner 方墩 / template-floor(4×4) 地板 + floor-detail-a 变体
+     *   - 单一 colormap 材质 → mergeGeometries 全图合并为 1 个 Mesh（1 draw call）
+     *   - 墙体缩放 S = min(等距墙高/4.25, 0.88)：厚度 1.001×S ≤ 0.881 单位，
+     *     恒 ⊆ 碰撞带（wallThickness 9px = 0.9 单位）；墙段首尾与碰撞矩形对齐
+     *   - 横墙顶 +0.01 / 纵墙顶 −0.01：十字交点顶面错位，避免共面 z-fight
+     *   - kit 未就绪/失败 → 碰撞盒子回退（本函数始终可用）
+     */
+    let mapGroup = null, mapKey = null, mapVisual = null;
+    const kitGeos = {};   // 名称 → { geo, bb }
+    let kitMat = null;
+    const KIT_DIR = 'kenney_modular-space-kit_1.0/Models/GLB%20format/';
 
-    let mapGroup = null, mapKey = null;
+    function disposeMap() {
+      if (!mapGroup) return;
+      scene.remove(mapGroup);
+      mapGroup.traverse(o => { if (o.geometry) o.geometry.dispose(); });
+      mapGroup = null;
+    }
+
+    /* 确定性杂凑（地板/墙板细节变体派生，与 iso 的确定性装饰同思路） */
+    function hash2(seed, a, b) {
+      let h = seed | 0;
+      h = Math.imul(h ^ (a * 0x9e3779b1), 0x85ebca6b);
+      h = Math.imul(h ^ (b * 0xc2b2ae35), 0x27d4eb2f);
+      h ^= h >>> 15;
+      return (h >>> 0) / 4294967296;
+    }
+
+    /* 放置一份几何：底部对齐 yBase、中心对齐 (cx,cz)、yaw 旋转、非均匀缩放 */
+    const placeM = new THREE.Matrix4(), placeQ = new THREE.Quaternion(),
+      placeV = new THREE.Vector3(), placeS = new THREE.Vector3(), upY = new THREE.Vector3(0, 1, 0);
+    function placeGeo(list, entry, cx, yBase, cz, sx, sy, sz, yaw) {
+      const g = entry.geo.clone();
+      const c = entry.bb.getCenter(placeV).clone();
+      const q = yaw ? placeQ.setFromAxisAngle(upY, yaw).clone() : new THREE.Quaternion();
+      // 世界变换 = T(锚点) · R · S · T(−局部中心)；再把底边落到 yBase
+      const halfH = (entry.bb.max.y - entry.bb.min.y) / 2 * sy;
+      placeM.compose(new THREE.Vector3(cx, yBase + halfH, cz), q, placeS.set(sx, sy, sz));
+      placeM.multiply(new THREE.Matrix4().makeTranslation(-c.x, -c.y, -c.z));
+      g.applyMatrix4(placeM);
+      list.push(g);
+    }
+
     function buildMap(maze) {
-      if (mapGroup) {
-        scene.remove(mapGroup);
-        mapGroup.traverse(o => { if (o.geometry && o.userData.wall) o.geometry.dispose(); });
-      }
+      disposeMap();
       mapGroup = new THREE.Group();
       const u = 1 / PX;
-      const ground = new THREE.Mesh(
-        new THREE.PlaneGeometry(maze.width * u, maze.height * u),
-        new THREE.MeshStandardMaterial({ color: new THREE.Color(CONFIG.THEME.iso.ground), roughness: 0.95 }));
-      ground.rotation.x = -Math.PI / 2;
-      ground.position.set(maze.width * u / 2, 0, maze.height * u / 2);
-      mapGroup.add(ground);
-      const wallH = game.iso.heightZ(maze) * u;
-      const wallMat = new THREE.MeshStandardMaterial({ color: new THREE.Color(CONFIG.COLORS.wall), roughness: 0.85 });
-      for (const w of maze.walls) {
-        const box = new THREE.Mesh(new THREE.BoxGeometry(w.w * u, wallH, w.h * u), wallMat);
-        box.position.set((w.x + w.w / 2) * u, wallH / 2, (w.y + w.h / 2) * u);
-        box.userData.wall = true;
-        mapGroup.add(box);
+      const wallHref = game.iso.heightZ(maze) * u;
+      mapVisual = null;
+
+      if (kitMat && kitGeos.wall && kitGeos.floor) {
+        /* -------- kit 模块拼装 -------- */
+        const S = Math.min(wallHref / 4.25, 0.88);      // 厚度约束优先：1.001·0.88=0.881 ≤ 0.9
+        const wallH = 4.25 * S, pieceLen = 4 * S;
+        const list = [];
+        const T = maze.thickness * u;
+        let pieces = 0;
+
+        // 地板：按墙件节律平铺（沉 0.02，坦克轮底 y=0 不与地板共面）
+        const mapW = maze.width * u, mapH = maze.height * u;
+        const nC = Math.max(1, Math.round(mapW / pieceLen)), nR = Math.max(1, Math.round(mapH / pieceLen));
+        const tW = mapW / nC, tR = mapH / nR, floorY = -0.02;
+        for (let r = 0; r < nR; r++) for (let c = 0; c < nC; c++) {
+          const detail = hash2(maze.seed, c * 733 + 11, r * 977 + 3) < 0.16;
+          placeGeo(list, detail ? kitGeos.floorDetail : kitGeos.floor,
+            (c + 0.5) * tW, floorY, (r + 0.5) * tR, tW / 4, 1, tR / 4, 0);
+          pieces++;
+        }
+
+        // 墙体：逐段铺模块（视觉矩形 ⊆ 碰撞矩形）
+        const runs = [];
+        const vtS = 1.001 * S;                            // 视觉厚度（恒 ≤ 0.881）
+        for (let wi = 0; wi < maze.walls.length; wi++) {
+          const w = maze.walls[wi];
+          const x0 = w.x * u, z0 = w.y * u, x1 = (w.x + w.w) * u, z1 = (w.y + w.h) * u;
+          const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2;
+          const horiz = w.w >= w.h;                       // 长轴 X / Z
+          const len = horiz ? x1 - x0 : z1 - z0;
+          let vr;
+          if (len < pieceLen * 0.5) {
+            // 方墩/超短段：corner 柱居中（footprint 1.001² × S ⊆ 0.9²）
+            placeGeo(list, kitGeos.stub, cx, 0, cz, S, S, S, 0);
+            pieces++;
+            vr = { x0: cx - vtS / 2, x1: cx + vtS / 2, z0: cz - vtS / 2, z1: cz + vtS / 2 };
+          } else {
+            let N = Math.max(1, Math.round(len / pieceLen));
+            let stretch = len / (N * pieceLen);
+            if (stretch > 1.25) { N++; stretch = len / (N * pieceLen); }
+            else if (stretch < 0.8 && N > 1) { N--; stretch = len / (N * pieceLen); }
+            const yBase = horiz ? 0.01 : -0.01;           // 十字交点顶面错位（0.2px）防 z-fight
+            for (let i = 0; i < N; i++) {
+              const a0 = (horiz ? x0 : z0) + i * len / N;
+              const mid = a0 + len / (2 * N);
+              const detail = hash2(maze.seed, wi * 131 + 17, i * 29) < 0.12;
+              const entry = detail ? kitGeos.wallDetail : kitGeos.wall;
+              const thS = detail ? 1.001 / 1.369 : 1;     // 细节件更厚，压回 1.001 等效厚度
+              placeGeo(list, entry, horiz ? mid : cx, yBase, horiz ? cz : mid,
+                S * stretch, S, S * thS, horiz ? 0 : Math.PI / 2);
+              pieces++;
+            }
+            vr = horiz
+              ? { x0, x1, z0: cz - vtS / 2, z1: cz + vtS / 2 }
+              : { x0: cx - vtS / 2, x1: cx + vtS / 2, z0, z1 };
+          }
+          runs.push({ crash: { x0, z0, x1, z1 }, visual: vr, horiz, lenPx: +(len * PX).toFixed(1) });
+        }
+
+        const merged = BufferGeometryUtils.mergeGeometries(list, false);
+        for (const g of list) g.dispose();
+        const mesh = new THREE.Mesh(merged, kitMat);
+        mesh.userData.map = true;
+        mapGroup.add(mesh);
+        mapVisual = { mode: 'kit', S: +S.toFixed(4), wallH: +wallH.toFixed(3), vt: +vtS.toFixed(3),
+          wallHref: +wallHref.toFixed(3), pieces, floorTiles: nC * nR, floorY, runs, meshes: 1 };
+      } else {
+        /* -------- 回退：碰撞盒（kit 未就绪） -------- */
+        const ground = new THREE.Mesh(
+          new THREE.PlaneGeometry(maze.width * u, maze.height * u),
+          new THREE.MeshStandardMaterial({ color: new THREE.Color(CONFIG.THEME.iso.ground), roughness: 0.95 }));
+        ground.rotation.x = -Math.PI / 2;
+        ground.position.set(maze.width * u / 2, 0, maze.height * u / 2);
+        mapGroup.add(ground);
+        const wallMat = new THREE.MeshStandardMaterial({ color: new THREE.Color(CONFIG.COLORS.wall), roughness: 0.85 });
+        for (const w of maze.walls) {
+          const box = new THREE.Mesh(new THREE.BoxGeometry(w.w * u, wallHref, w.h * u), wallMat);
+          box.position.set((w.x + w.w / 2) * u, wallHref / 2, (w.y + w.h / 2) * u);
+          box.userData.wall = true;
+          mapGroup.add(box);
+        }
+        mapVisual = { mode: 'box', wallH: +wallHref.toFixed(3), pieces: maze.walls.length + 1, meshes: mapGroup.children.length };
       }
       scene.add(mapGroup);
       mapKey = maze;
       report.map = maze.name + ' ' + (maze.width | 0) + 'x' + (maze.height | 0);
+      report.mapVisual = mapVisual;
     }
+
+    /* Kenney Space Kit 模块件加载（全部就绪后若已有地图则重建为 kit 版） */
+    (function loadKit() {
+      const PARTS = {
+        wall: 'template-wall', wallDetail: 'template-wall-detail-a', stub: 'template-wall-corner',
+        floor: 'template-floor', floorDetail: 'template-floor-detail-a'
+      };
+      const keys = Object.keys(PARTS);
+      let done = 0;
+      for (const k of keys) {
+        new GLTFLoader().load(KIT_DIR + PARTS[k] + '.glb', g => {
+          let mesh = null;
+          g.scene.traverse(o => { if (!mesh && o.isMesh) mesh = o; });
+          if (!mesh) throw new Error(PARTS[k] + ' 无网格');
+          const geo = mesh.geometry.clone();
+          geo.computeBoundingBox();
+          kitGeos[k] = { geo, bb: geo.boundingBox };
+          if (!kitMat && mesh.material) {
+            kitMat = mesh.material;                      // 全部件共用 colormap 图集材质
+            if (kitMat.map) kitMat.map.anisotropy = renderer.capabilities.getMaxAnisotropy();
+          }
+          if (++done === keys.length) {
+            report.kit = 'ok';
+            refreshStatusPanel();
+            if (mapKey) buildMap(mapKey);                // 已渲染的地图升级为 kit 版
+          }
+        }, undefined, err => {
+          report.kit = 'fail';
+          report.errors.push('Kit[' + k + ']: ' + (err && err.message ? err.message : err));
+          refreshStatusPanel();
+        });
+      }
+    })();
 
     /* ---------- 坦克实例（GLB 复用 + 队伍色） ---------- */
 
@@ -305,18 +454,49 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
       /* 相机（复用 iso 跟随；缩放按 iso.u 标定菱形宽度一致） */
       const iso = game.iso;
-      const cw = iso.unproject(game.camera.x + game.viewW / 2, game.camera.y + game.viewH / 2);
-      tmpV.set(cw.x / PX, 0, cw.y / PX);
-      camera.position.copy(tmpV).addScaledVector(camDir, 200);
-      camera.lookAt(tmpV);
-      const pxPerUnit = Math.SQRT2 * iso.u * PX;
-      const top = game.viewH / (2 * pxPerUnit);
-      if (Math.abs(camera.top - top) > 1e-6 || camera.aspect !== game.viewW / game.viewH) {
-        camera.top = top; camera.bottom = -top;
-        camera.aspect = game.viewW / game.viewH;
-        camera.left = -top * camera.aspect; camera.right = top * camera.aspect;
-        camera.updateProjectionMatrix();
-        renderer.setSize(game.viewW, game.viewH, false);
+      if (report.debugOverview) {
+        /* 全景取景（仅渲染层诊断/截图，玩法视角与输入不受影响）：
+         * 把整张地图（含墙高）包络进正交视口 */
+        const u2 = 1 / PX;
+        const cx = maze.width * u2 / 2, cz = maze.height * u2 / 2;
+        tmpV.set(cx, 0, cz);
+        camera.position.copy(tmpV).addScaledVector(camDir, 200);
+        camera.lookAt(tmpV);
+        camera.updateMatrixWorld();
+        camera.matrixWorldInverse.copy(camera.matrixWorld).invert();
+        const wallH2 = (mapVisual && mapVisual.wallH) || 3;
+        let hx = 0, hy = 0;
+        for (let ci = 0; ci < 4; ci++) {
+          const px = (ci & 1) ? maze.width * u2 : 0, pz = (ci & 2) ? maze.height * u2 : 0;
+          for (const py of [0, wallH2]) {
+            projV.set(px, py, pz).applyMatrix4(camera.matrixWorldInverse);
+            hx = Math.max(hx, Math.abs(projV.x)); hy = Math.max(hy, Math.abs(projV.y));
+          }
+        }
+        const mg = 1.08;
+        const halfA = Math.max(hx * mg, hy * mg * (game.viewW / game.viewH));
+        const halfB = halfA / (game.viewW / game.viewH);
+        if (Math.abs(camera.top - halfB) > 1e-6 || camera.aspect !== game.viewW / game.viewH) {
+          camera.top = halfB; camera.bottom = -halfB;
+          camera.aspect = game.viewW / game.viewH;
+          camera.left = -halfA; camera.right = halfA;
+          camera.updateProjectionMatrix();
+          renderer.setSize(game.viewW, game.viewH, false);
+        }
+      } else {
+        const cw = iso.unproject(game.camera.x + game.viewW / 2, game.camera.y + game.viewH / 2);
+        tmpV.set(cw.x / PX, 0, cw.y / PX);
+        camera.position.copy(tmpV).addScaledVector(camDir, 200);
+        camera.lookAt(tmpV);
+        const pxPerUnit = Math.SQRT2 * iso.u * PX;
+        const top = game.viewH / (2 * pxPerUnit);
+        if (Math.abs(camera.top - top) > 1e-6 || camera.aspect !== game.viewW / game.viewH) {
+          camera.top = top; camera.bottom = -top;
+          camera.aspect = game.viewW / game.viewH;
+          camera.left = -top * camera.aspect; camera.right = top * camera.aspect;
+          camera.updateProjectionMatrix();
+          renderer.setSize(game.viewW, game.viewH, false);
+        }
       }
       if (game.input.viewMapper !== viewMapper3d) game.input.setViewMapper(viewMapper3d);
 
@@ -441,6 +621,8 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
       pGeo.attributes.color.needsUpdate = true;
 
       renderer.render(scene, camera);
+      report.tris = renderer.info.render.triangles;   // 性能记录（验收用）
+      report.calls = renderer.info.render.calls;
 
       /* 数值对照（信息性：3D 投影 vs 等距投影；输入映射 vs 等距映射） */
       if (!menu && game.player && game.player.alive) {
