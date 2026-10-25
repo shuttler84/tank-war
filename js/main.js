@@ -17,12 +17,17 @@
 
     window.addEventListener('resize', () => game.resize());
 
-    // 失焦自动暂停，避免鼠标状态残留与物理时间异常
+    // 失焦自动暂停，避免鼠标状态残留与物理时间异常。
+    // 双重防误判：① 开局 0.6s 宽限（点击"开始"瞬间窗口焦点可能抖动，
+    // 表现为"没按暂停却弹暂停框"）；② document.hasFocus() 校验（真实失焦
+    // 时为 false，页面内元素切换等伪 blur 事件时为 true）
+    const blurShouldPause = () =>
+      game.state === 'playing' && !document.hasFocus() && game.time > 0.6;
     window.addEventListener('blur', () => {
-      if (game.state === 'playing') game.pause();
+      if (blurShouldPause()) game.pause();
     });
     document.addEventListener('visibilitychange', () => {
-      if (document.hidden && game.state === 'playing') game.pause();
+      if (document.hidden && blurShouldPause()) game.pause();
     });
 
     game.input.onFirstInput = () => game.sound.resume();

@@ -46,6 +46,10 @@ window.addEventListener('load', function () {
       // 2) 开始一局
       document.getElementById('btn-start').click();
       check('点击开始进入对局', g.state === 'playing', 'state=' + g.state);
+      // 开局瞬间的伪 blur（焦点抖动/页面内切换）不得触发自动暂停（用户实测反馈：
+      // 未按暂停却弹出暂停框）。hasFocus()=true 的合成 blur + 开局宽限期双守卫
+      window.dispatchEvent(new Event('blur'));
+      check('开局伪 blur 不触发自动暂停', g.state === 'playing', 'state=' + g.state);
       // 检查过程中给玩家无敌保护，避免 AI 击毁玩家造成时序性误报
       g.player.invuln = 999;
 
