@@ -1,3 +1,26 @@
+# 坦克动荡：本地版 · 3D 玩具风升级
+
+> **3D 升级版说明**：在保留原版全部玩法（布局/碰撞/弹道/道具/AI/胜负零改动）的基础上，
+> 渲染层升级为 **Three.js 3D 玩具风**：Kenney 玩具坦克（Blender 制作，炮口按游戏弹道标定）、
+> Kenney Modular Space Kit 模块化太空站地图（13 张地图全部 3D 化，三套官方配色）、
+> 原版道具图标 3D 广告牌 + 主菜单道具图鉴。
+>
+> - **启动**：双击 `start.bat`（需 Python 3，自动起本地服务打开 3D 版；
+>   无 Python 时回退原版 2D 等距视图，游戏完全可玩）。3D 层需 HTTP 服务
+>   （浏览器限制 file:// 下的模块/模型加载），手动方式 `python -m http.server 8080`
+>   后访问 `http://127.0.0.1:8080/index.html`。
+> - **视图切换**：默认 3D；`?proto3d=0` 强制原版 2D 等距；`?overview=1` 全景取景。
+> - **验收与复测**：`node tests/map-rollout-check.js`（13 图逐图 A–H 断言+截图）、
+>   `node tests/integration-check.js`（7 摆位）、`node tests/run-tests.js`（69 项逻辑回归）、
+>   `node tests/proto-check.js`（原型页）。详见 `docs/`（integration-3d / map-visual-3d /
+>   map-rollout-3d / final-acceptance）。
+> - **资源与许可**：three.js r170（MIT，`vendor/LICENSE-three`）；Kenney Modular Space Kit
+>   与 Car Kit（CC0，各目录 `License.txt`）；坦克模型源文件/脚本见 `blender-3d/`
+>   （`.blend` 可编辑 + Python 构建/验证脚本 + 导出 GLB）。原始资源包未做任何修改。
+> - **已知边界**：file:// 双击直接打开 index.html 时自动回退 2D（离线打包属后续事项）。
+
+---
+
 # 坦克动荡：本地版
 
 一款用 **HTML5 Canvas + 原生 JavaScript** 实现的单机迷宫坦克射击游戏。

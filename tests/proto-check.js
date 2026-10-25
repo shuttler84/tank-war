@@ -39,6 +39,10 @@ const CASES = [
 ];
 
 function run(name, url, pngPath) {
+  // 清理上次运行的浏览器配置（含磁盘缓存）：页面/脚本变更后避免陈旧缓存
+  for (const suffix of ['-' + name, '-' + name + '-dom']) {
+    try { fs.rmSync(USER_DIR + suffix, { recursive: true, force: true }); } catch (e) {}
+  }
   const shotArgs = [
     '--headless', '--enable-unsafe-swiftshader', '--hide-scrollbars',
     '--no-first-run', '--no-default-browser-check',

@@ -31,10 +31,16 @@ const tmp = path.join(root, 'node-tmp');
 fs.mkdirSync(tmp, { recursive: true });
 
 const SCENARIOS = [
-  { pose: 'overview' }, { pose: 'move' }, { pose: 'turret' }, { pose: 'muzzle' }, { pose: 'wall' }, { pose: 'bounce' }
+  { pose: 'overview' }, { pose: 'menu' }, { pose: 'move' }, { pose: 'turret' }, { pose: 'muzzle' }, { pose: 'wall' }, { pose: 'bounce' }
 ];
 
 function edge(args, tag) {
+  // 清理上次运行的浏览器配置（含磁盘缓存）：页面/脚本变更后避免陈旧缓存
+  for (const d of fs.readdirSync(tmp)) {
+    if (d.startsWith('profile-') && (tag ? d.endsWith('-' + tag) : true)) {
+      try { fs.rmSync(path.join(tmp, d), { recursive: true, force: true }); } catch (e) {}
+    }
+  }
   return execFileSync(browser, [
     '--headless', '--enable-unsafe-swiftshader', '--hide-scrollbars',
     '--no-first-run', '--no-default-browser-check',

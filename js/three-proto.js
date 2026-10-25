@@ -68,7 +68,10 @@ import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js'
       'Δ投影 ' + report.dProjPx + ' px · Δ输入映射 ' + report.dInputPx + ' px'
     ];
     if (report.debugTurretOffset) lines.push('炮塔诊断偏移 ' + (report.debugTurretOffset * 180 / Math.PI).toFixed(0) + '°（不影响玩法）');
-    if (report.errors.length) lines.push('错误 ' + report.errors.length + ' 条（__proto3d.errors）');
+    if (report.errors.length) {
+      lines.push('错误 ' + report.errors.length + ' 条（__proto3d.errors）');
+      lines.push('首条: ' + String(report.errors[0]).slice(0, 100));
+    }
     setStatus(lines.join('\n'), report.errors.length > 0);
   }
 
@@ -178,7 +181,8 @@ import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js'
       const wallHref = game.iso.heightZ(maze) * u;
       mapVisual = null;
 
-      if (kitMat && kitGeos.wall && kitGeos.floor) {
+      if (kitMat && kitGeos.wall && kitGeos.wallDetail && kitGeos.stub
+        && kitGeos.floor && kitGeos.floorDetail) {
         /* -------- kit 模块拼装 -------- */
         const S = Math.min(wallHref / 4.25, 0.88);      // 厚度约束优先：1.001·0.88=0.881 ≤ 0.9
         const wallH = 4.25 * S, pieceLen = 4 * S;
@@ -391,9 +395,25 @@ import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js'
     const bulletPool = makePool(() => new THREE.Mesh(
       new THREE.SphereGeometry(0.45, 10, 8),
       new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0x666666 })));
-    const pickupPool = makePool(() => new THREE.Mesh(
-      new THREE.SphereGeometry(0.95, 12, 10),
-      new THREE.MeshStandardMaterial({ roughness: 0.35 })));
+    /* 道具：原版图标广告牌（PickupIcons 复用 2D 绘制 → CanvasTexture），
+     * 颜色 + 形状双区分，与主菜单图鉴同源 */
+    const pickupTexCache = {};
+    function pickupTexture(type) {
+      if (!pickupTexCache[type]) {
+        const tex = new THREE.CanvasTexture(PickupIcons.canvas(type));
+        tex.colorSpace = THREE.SRGBColorSpace;
+        tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+        pickupTexCache[type] = tex;
+      }
+      return pickupTexCache[type];
+    }
+    const pickupPool = makePool(() => {
+      const s = new THREE.Sprite(new THREE.SpriteMaterial({
+        transparent: true, depthWrite: false
+      }));
+      s.scale.set(2.3, 2.3, 1);
+      return s;
+    });
     const minePool = makePool(() => new THREE.Mesh(
       new THREE.CylinderGeometry(0.8, 0.95, 0.22, 12),
       new THREE.MeshStandardMaterial({ color: 0x6b4a26, roughness: 0.7 })));
@@ -592,12 +612,10 @@ import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js'
       if (!menu) {
         for (let i = 0; i < game.pickups.length; i++) {
           const pk = game.pickups[i];
-          const def = PICKUP_TYPES[pk.type];
           const m = pickupPool.acquire();
-          m.position.set(pk.x / PX, 1.05 + Math.sin(game.time * 3 + i * 1.7) * 0.16, pk.y / PX);
-          m.material.color.set(def ? def.color : '#ffffff');
-          m.material.emissive.set(def ? def.color : '#222222');
-          m.material.emissiveIntensity = 0.35;
+          m.material.map = pickupTexture(pk.type);
+          m.material.needsUpdate = true;
+          m.position.set(pk.x / PX, 1.1 + Math.sin(game.time * 3 + i * 1.7) * 0.16, pk.y / PX);
         }
       }
 

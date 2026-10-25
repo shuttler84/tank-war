@@ -440,6 +440,7 @@
       check('F-暂停 | 暂停/恢复正常', paused && game.state === 'playing', '');
 
       /* ---------- G 地图视觉（kit 模块化） ---------- */
+      game.render();                                    // 确保 mapVisual 对应当前迷宫（随机图 restart 会重新生成）
       const mv = P3.mapVisual;
       if (mv && mv.mode === 'kit') {
         check('G-Kit | 模块件已加载并生效', mv.mode === 'kit' && mv.pieces > 0,
@@ -472,6 +473,81 @@
       } else {
         check('G-Kit | 模块件已加载并生效', false, 'mapVisual=' + (mv ? mv.mode : 'null') + ' kit=' + P3.kit);
       }
+
+      /* ---------- H 视野跟随 / 持续机动 / 远端可达（大图重点） ---------- */
+      {
+        game.restart();
+        everyoneInvuln();
+        game.pickups.length = 0; game.pickupTimer = 9999; game.bullets.length = 0;
+        const p = game.player;
+        const bigMap = game.maze.width > 1600;
+        // 目标：距出生点最远的角落
+        const corners = [[60, 60], [game.maze.width - 60, 60], [60, game.maze.height - 60],
+          [game.maze.width - 60, game.maze.height - 60]];
+        let tgt = corners[0], bestD = -1;
+        for (const c of corners) {
+          const d = Math.hypot(c[0] - p.x, c[1] - p.y);
+          if (d > bestD) { bestD = d; tgt = c; }
+        }
+
+        /* ① 持续机动采样（10s 直驱 + 停滞切向绕行）：证明操控持续产生位移 */
+        let maxCamErr = 0, total = 0, detour = 0;
+        for (let seg = 0; seg < 20; seg++) {
+          let dx = tgt[0] - p.x, dy = tgt[1] - p.y;
+          const a0 = Math.atan2(dy, dx) + detour * (Math.PI / 3);
+          dx = Math.cos(a0); dy = Math.sin(a0);
+          aimMouseAt(p.x + dx * 300, p.y + dy * 300);       // 死区圆外
+          const x0 = p.x, y0 = p.y;
+          for (let s = 0; s < 30; s++) game.update(1 / 60);
+          const moved = Math.hypot(p.x - x0, p.y - y0);
+          total += moved;
+          if (moved < 8) detour = (detour + 1) % 6;         // 停滞 → 换一个绕行角
+          // 相机必须等于"跟随+边界钳制"的期望中心（updateWorld 中相机先于
+          // 坦克物理执行，稳态尾随一帧 ≈3.5px 属原版顺序）
+          const pp = iso.project(p.x, p.y, 0);
+          maxCamErr = Math.max(maxCamErr,
+            Math.abs(game.camera.x - iso.clampCamX(pp.x)),
+            Math.abs(game.camera.y - iso.clampCamY(pp.y)));
+        }
+        check('H-跟随 | 视野逐帧跟随玩家（含边界钳制，偏差 ≤6px=一帧尾随）', maxCamErr <= 6,
+          '最大偏差=' + maxCamErr.toFixed(2) + 'px');
+        check('H-机动 | 持续机动（10s 累计 ≥250px，密走廊直线采样下限）', total >= 250,
+          '累计=' + total.toFixed(0) + 'px');
+
+        /* ② 远端可达性（传送验证）：最远角可站立、可机动、视野即时跟随 */
+        let far = null, fd = -1;
+        for (let i = 0; i < game.maze.navFree.length; i++) {
+          if (!game.maze.navFree[i]) continue;
+          const c = game.maze.navCenter(i);
+          const d = Math.hypot(c.x - game.maze.width / 2, c.y - game.maze.height / 2);
+          if (d > fd) { fd = d; far = c; }
+        }
+        let standOk = false, moveOk = false, farCamOk = false;
+        if (far) {
+          p.x = far.x; p.y = far.y; p.speed = 0; p.angle = p.aimAngle = 0;
+          standOk = game.maze.isFree(p.x, p.y, p.radius - 0.5);
+          game.camera.follow(p.x, p.y, game.maze.width, game.maze.height);
+          if (game.isoActive) game.followIsoCamera();
+          const cx = game.maze.width / 2 - p.x, cy = game.maze.height / 2 - p.y;
+          const ca = Math.atan2(cy, cx);
+          aimMouseAt(p.x + Math.cos(ca) * 300, p.y + Math.sin(ca) * 300);
+          const fx = p.x, fy = p.y;
+          for (let s = 0; s < 90; s++) game.update(1 / 60);
+          moveOk = Math.hypot(p.x - fx, p.y - fy) > 30;
+          const pp = iso.project(p.x, p.y, 0);
+          farCamOk = Math.abs(game.camera.x - iso.clampCamX(pp.x)) <= 6
+            && Math.abs(game.camera.y - iso.clampCamY(pp.y)) <= 6;
+        }
+        check('H-可达 | 最远端区域可站立且可机动', standOk && moveOk,
+          (far ? '远点=(' + far.x.toFixed(0) + ',' + far.y.toFixed(0) + ')' : '无导航点')
+          + ' 站立=' + standOk + ' 机动=' + moveOk);
+        check('H-可达 | 远端区域视野跟随', farCamOk, '');
+
+        // 控制台无未处理错误（模块内 window error/unhandledrejection 捕获）
+        check('H-控制台 | 无未处理 JS 错误', (P3.errors || []).length === 0,
+          'errors=' + (P3.errors || []).length
+          + ((P3.errors && P3.errors.length) ? ' 首条=' + String(P3.errors[0]).slice(0, 120) : ''));
+      }
     }
 
     /* ---------- 截图摆位（确定性：摆位 → 冻结逻辑 → 持续重绘） ---------- */
@@ -492,6 +568,14 @@
     finish();
 
     function applyPose(pose) {
+      if (pose === 'menu') {
+        // 菜单摆位：回主菜单并展开道具图鉴后定格（展示图鉴/图标贴图）
+        game.backToMenu();
+        const det = document.getElementById('pickup-legend');
+        if (det) det.open = true;
+        game.render();
+        return;
+      }
       game.startMatch({ mapId: MAP, enemies: 2, difficulty: 'normal' });
       // 摆位稳定性约定（与 A–E 段一致）：清道具/全员无敌/重置武器，
       // 避免随机拾取把 fire() 换成激光（炮口摆位将无炮弹）、敌方流弹击毁坦克
