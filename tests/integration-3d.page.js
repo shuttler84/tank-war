@@ -395,7 +395,15 @@
           const mirrorX = Math.abs(b.dx + before.dx) < 1e-6 && Math.abs(b.dy - before.dy) < 1e-6;
           const mirrorY = Math.abs(b.dy + before.dy) < 1e-6 && Math.abs(b.dx - before.dx) < 1e-6;
           const corner = Math.abs(b.dx + before.dx) < 1e-6 && Math.abs(b.dy + before.dy) < 1e-6;
-          mirrorOk = (mirrorX || mirrorY || corner) && game.maze.isFree(b.x, b.y, 3.4)
+          // 合法反射点：弹心不在任何墙内（isFree r=0），且距墙 ≥ 半径的一半
+          // （贴墙反弹本应≈半径距离；大余量会把合法贴墙点误判为嵌入）
+          const freeOk = game.maze.isFree(b.x, b.y, 0) && near >= CONFIG.BULLET.radius * 0.5;
+          if (!freeOk) results.push('INFO | E-诊断 不嵌墙检查失败 dist='
+            + (() => { let m = 1e9; for (const w of game.maze.queryWalls(b.x, b.y, 20)) {
+              const dx = Math.max(w.x - b.x, 0, b.x - (w.x + w.w));
+              const dy = Math.max(w.y - b.y, 0, b.y - (w.y + w.h));
+              m = Math.min(m, Math.hypot(dx, dy)); } return m.toFixed(2); })());
+          mirrorOk = (mirrorX || mirrorY || corner) && freeOk
             && Math.abs(Math.hypot(b.dx, b.dy) - Math.hypot(before.dx, before.dy)) < 1e-6;
           mirrorDetail = '入射(' + before.dx.toFixed(2) + ',' + before.dy.toFixed(2) + ')'
             + ' 出射(' + b.dx.toFixed(2) + ',' + b.dy.toFixed(2) + ')'

@@ -106,6 +106,37 @@ const AI_DIFFICULTIES = {
     intelMaxAge: 7.0,
     coordination: 0.90,
     ambushSkill: 0.60
+  },
+  demon: {
+    key: 'demon', name: '恶魔',
+    // 复用 hard 的战术/机动量级（不改变敌人数量/速度/射速等既有数值语义）
+    thinkInterval: 0.10,
+    reaction: 0.22,
+    aimError: 0.07,
+    fireTolerance: 0.10,
+    fireCooldown: 1.00,
+    leadFactor: 0.80,
+    missChance: 0.06,
+    dodgeDelay: 0.22,
+    dodgeThreshold: 0.28,
+    dodgeDuration: 0.36,
+    bounceSkill: 0.85,
+    bounceScanInterval: 1.1,
+    idealRange: 260,
+    speed: 176,
+    turnSpeed: 9.2,
+    memoryDecay: 10.0,
+    pursueConf: 0.30,
+    searchMaxPoints: 4,
+    searchDuration: 6.5,
+    flankSkill: 0.85,
+    tacticInterval: 0.7,
+    intelShare: 0.85,
+    intelMaxAge: 7.0,
+    coordination: 0.0,       // 恶魔：不分工（全体锁定玩家）
+    ambushSkill: 0.25,
+    /* ---- 恶魔专属 ---- */
+    demon: true              // 全员以玩家为唯一主动攻击目标 + 锁定范围约束
   }
 };
 
@@ -486,6 +517,20 @@ class AIController {
       this.state = 'wander';
       this.wander();
       return;
+    }
+
+    /* 恶魔难度：锁定范围约束（CONFIG.AI.demonLockRadius）。
+     * 范围外：清空情报并巡逻（复用现有 forgetIntel/wander 管线）——
+     * 不查询玩家实时坐标、不开全图追踪；回到范围内恢复标准感知。
+     * 目标选择与炮弹碰撞过滤彻底解耦：敌方间误伤不受此影响。 */
+    if (this.diff.demon) {
+      const lockR = CONFIG.AI.demonLockRadius;
+      if (dist(tank.x, tank.y, player.x, player.y) > lockR && !this.hasLos) {
+        if (this.lastKnown || this.intelConf > 0) this.forgetIntel();
+        this.state = 'wander';
+        this.wander();
+        return;
+      }
     }
 
     /* ---------- 感知段 ----------

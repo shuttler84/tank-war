@@ -572,10 +572,15 @@ class Game {
     const x1 = x + mvx, y1 = y + mvy;
     let best = null;
     let bestT = 2;
+    // 出生保护：炮弹生成后 spawnOwnerImmune 秒内不与发射者判定
+    // （炮口 24px > 命中半径和，正常直射本就够不到；保护仅防极端场景误碰，
+    //  反弹/超时不延长 → 反弹回来自伤始终有效）
+    const ownerImmune = bullet.ownerId !== undefined &&
+      bullet.age < CONFIG.BULLET.spawnOwnerImmune;
     for (let i = 0; i < this.tanks.length; i++) {
       const t = this.tanks[i];
       if (!t.alive) continue;
-      if (t.id === bullet.ownerId) continue;   // 统一规则：子弹不会伤害发射者
+      if (ownerImmune && t.id === bullet.ownerId) continue;
       if (t.invuln > 0) continue;              // 复活保护
       const tt = Physics.segmentCircle(x, y, x1, y1, t.x, t.y, t.radius + bullet.radius);
       if (tt >= 0 && tt < bestT) { bestT = tt; best = t; }
@@ -592,6 +597,8 @@ class Game {
     this.addShake(9);
     if (this.sound) this.sound.play('explosion');
 
+    // 计分规则（含自伤）：只有"玩家发射且命中非玩家"才计分/击杀——
+    // 玩家自伤不计分不扣杀敌数；敌军自伤/误伤不给玩家分，checkVictory 照常
     if (bullet.ownerId === this.player.id && !target.isPlayer) {
       this.score += CONFIG.RULES.scorePerKill;
       this.kills++;
@@ -931,7 +938,7 @@ class Game {
     for (let i = 0; i < this.tanks.length; i++) {
       const t = this.tanks[i];
       if (!t.alive || t.invuln > 0) continue;
-      if (t.id === mine.ownerId) continue;              // 与"子弹不伤发射者"一致
+      if (t.id === mine.ownerId) continue;              // 地雷维持原版设计：不伤布设者（任务范围仅炮弹）
       if (dist(t.x, t.y, mine.x, mine.y) > cfg.mineBlastRadius + t.radius) continue;
       if (!this.maze.losClear(mine.x, mine.y, t.x, t.y, CONFIG.BULLET.radius)) continue;
       this.onBulletHit({ ownerId: mine.ownerId, cluster: false, generation: 2 }, t);
@@ -987,7 +994,7 @@ class Game {
     let best = null, bestT = 2;
     for (let i = 0; i < this.tanks.length; i++) {
       const t = this.tanks[i];
-      if (!t.alive || t.invuln > 0 || t.id === ownerId) continue;
+      if (!t.alive || t.invuln > 0) continue;   // 激光同炮弹：可自伤
       const tt = Physics.segmentCircle(x0, y0, x1, y1, t.x, t.y, t.radius + 2);
       if (tt >= 0 && tt < bestT) { bestT = tt; best = t; }
     }
@@ -1021,7 +1028,9 @@ class Game {
     for (let i = 0; i < this.aiControllers.length; i++) {
       if (this.aiControllers[i].tank.alive) alive.push(this.aiControllers[i]);
     }
-    const maxHunters = this.settings.difficulty === 'hard'
+    const maxHunters = this.settings.difficulty === 'demon'
+      ? this.aiControllers.length
+      : this.settings.difficulty === 'hard'
       ? CONFIG.RULES.hunterMaxHard
       : CONFIG.RULES.hunterMaxNormal;
     const hunters = Math.min(maxHunters, Math.max(1, Math.ceil(alive.length / 2)));

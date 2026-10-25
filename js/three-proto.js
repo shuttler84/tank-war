@@ -394,7 +394,7 @@ import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js'
     }
 
     const bulletPool = makePool(() => new THREE.Mesh(
-      new THREE.SphereGeometry(0.45, 10, 8),
+      new THREE.SphereGeometry(0.225, 10, 8),   // 视觉半径同步碰撞减半（原 0.45）
       new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0x666666 })));
     /* 道具：原版图标广告牌（PickupIcons 复用 2D 绘制 → CanvasTexture），
      * 颜色 + 形状双区分，与主菜单图鉴同源 */
@@ -664,7 +664,7 @@ import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js'
         for (const bl of game.bullets) {
           if (bl.dead) continue;
           const m = bulletPool.acquire();
-          m.position.set(bl.x / PX, 0.55, bl.y / PX);
+          m.position.set(bl.x / PX, 0.3, bl.y / PX);
           m.material.color.set(bl.ownerColor || '#ffffff');
           m.material.emissive.set(bl.ownerColor || '#666666');
           m.material.emissiveIntensity = 0.55;

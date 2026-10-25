@@ -2493,6 +2493,201 @@
     assert(stamps.length >= 1, '武器结束后普通炮弹应可继续发射');
   });
 
+
+  /* =========================================================
+   * 炮弹尺寸与自伤（第二/三阶段）+ 恶魔难度（第四阶段）
+   * ========================================================= */
+
+  test('炮弹尺寸：碰撞半径为原 50%（统一参数），视觉球同步减半', function () {
+    assert(CONFIG.BULLET.radius === 1.8, '碰撞半径应为 1.8（3.6 的 50%），实际 ' + CONFIG.BULLET.radius);
+    // 消费链：子弹本体、AI 视线半径均随 config 走（代码审查确认单一定义点）
+    const g = freshGame('classic', 1);
+    const b = g.bullets[0] || null;
+    const p = g.player;
+    p.cooldown = 0; p.angle = 0; p.aimAngle = 0;
+    const shots = p.fire(g);
+    assert(shots.length === 1 && shots[0].radius === CONFIG.BULLET.radius,
+      '新炮弹半径应等于 CONFIG.BULLET.radius');
+    assert(shots[0].speed === CONFIG.BULLET.speed, '速度不变');
+    assert(shots[0].maxBounces === CONFIG.BULLET.maxBounces, '反弹次数不变');
+    metrics['炮弹/半径'] = CONFIG.BULLET.radius + 'px（原 3.6）';
+  });
+
+  test('炮弹生成：仍在炮口 24px，不因缩小进入坦克/墙体内部', function () {
+    const g = freshGame('classic', 1);
+    const p = g.player;
+    p.cooldown = 0; p.angle = 0; p.aimAngle = 0;
+    const shots = p.fire(g);
+    const b = shots[0];
+    const d = Math.hypot(b.x - p.x, b.y - p.y) - b.speed / 60;
+    // fire() 原语义：贴墙时按 wallHit.t-1.2 截短（可小于 muzzleOffset 但 ≥6px）
+    assert(d >= 6 && d <= CONFIG.TANK.muzzleOffset + 4,
+      '生成点应在炮口/墙前合法区间: ' + d.toFixed(2));
+    assert(g.maze.isFree(b.x, b.y, b.radius), '炮弹不应生成在墙内');
+    assert(Math.hypot(b.x - p.x, b.y - p.y) > p.radius, '炮弹不应生成在坦克内');
+  });
+
+  test('自伤：玩家炮弹反弹后命中自己——死亡/统计/胜负正确', function () {
+    const g = makeGame({ enemies: 1, difficulty: 'normal' });
+    const p = g.player;
+    for (const t of g.tanks) t.invuln = 9999;          // 冻结开场火拼
+    const lives0 = g.lives, deaths0 = g.deaths, kills0 = g.kills, score0 = g.score;
+    // 找一条东向短墙线（反弹回程必穿过发射者位置）
+    let spot = null;
+    for (let y = 80; y < g.maze.height - 80; y += 10) {
+      const h = g.maze.raycast(200, y, 1, 0, 600, 1.8);
+      if (h && h.t >= 80 && h.t <= 400) { spot = { x: 200, y: y, t: h.t }; break; }
+    }
+    assert(spot, '前置：找到东向反弹线');
+    for (const t of g.tanks) t.invuln = 0;             // 解封目标
+    p.invuln = 0;
+    p.x = spot.x; p.y = spot.y;
+    p.angle = p.aimAngle = 0; p.cooldown = 0; p.resetBurst();
+    g.input.mouse.down = true;                         // 真实管线发射
+    g.update(1 / 60);
+    g.input.mouse.down = false;
+    assert(g.bullets.length >= 1, '前置：发射成功');
+    for (let i = 0; i < 600 && p.alive; i++) g.update(1 / 60);
+    assert(!p.alive, '反弹炮弹应命中发射者（自伤），time=' + g.time.toFixed(2));
+    assert(g.lives === lives0 - 1, '生命应 -1');
+    assert(g.deaths === deaths0 + 1, '死亡统计 +1');
+    assert(g.kills === kills0 && g.score === score0, '自伤不得计击杀/得分');
+    for (let i = 0; i < 200; i++) g.update(1 / 60);
+    assert(g.state === 'playing' || g.state === 'over', '对局继续或按规则判负');
+    metrics['自伤/玩家反弹'] = '成立（复活后 ' + g.lives + ' 命）';
+  });
+
+  test('自伤：敌方炮弹反弹命中发射者（敌军统计正确，不给玩家分）', function () {
+    const g = makeGame({ enemies: 1, difficulty: 'normal' });
+    for (const t of g.tanks) t.invuln = 9999;          // 冻结开场火拼
+    const enemy = g.tanks.find(function (t) { return !t.isPlayer; });
+    g.aiControllers.length = 0;
+    const score0 = g.score, kills0 = g.kills;
+    let spot = null;
+    for (let y = 80; y < g.maze.height - 80; y += 10) {
+      const h = g.maze.raycast(400, y, 1, 0, 600, 1.8);
+      if (h && h.t >= 80 && h.t <= 400) { spot = { x: 400, y: y }; break; }
+    }
+    assert(spot, '前置：找到东向反弹线');
+    enemy.x = spot.x; enemy.y = spot.y;
+    enemy.invuln = 0;
+    enemy.angle = enemy.aimAngle = 0; enemy.cooldown = 0; enemy.resetBurst();
+    // 玩家不许开火（否则其默认朝向会命中敌人污染统计）：直接敌弹入列
+    if (enemy.updateFireGate(true)) {
+      const shots = enemy.fire(g);
+      for (const b of shots) g.bullets.push(b);
+    }
+    assert(g.bullets.some(function (b) { return b.ownerId === enemy.id; }), '前置：敌弹已入列');
+    for (let i = 0; i < 600 && enemy.alive; i++) g.update(1 / 60);
+    assert(!enemy.alive, '敌方应被自己的反弹炮弹击毁');
+    assert(g.kills === kills0, '敌军自伤不得计入玩家击杀数');
+    // 分数：唯一允许增量 = 敌全灭的胜利奖励（victoryBonus，原版设计）；
+    // 击杀分 scorePerKill 不得出现
+    const gained = g.score - score0;
+    assert(gained === 0 || gained === CONFIG.RULES.victoryBonus,
+      '敌军自伤得分应为 0 或胜利奖励，实际 ' + gained);
+    metrics['自伤/敌方反弹'] = '成立（得分增量 ' + gained + '）';
+  });
+
+  test('自伤：出生保护——发射瞬间不会立即命中发射者，且保护会过期', function () {
+    const g = freshGame('classic', 1);
+    const p = g.player;
+    assert(CONFIG.BULLET.spawnOwnerImmune > 0 && CONFIG.BULLET.spawnOwnerImmune < 0.5,
+      '出生保护应为短暂窗口');
+    // 真实管线发射（子弹进 g.bullets 并被 update 驱动）
+    p.cooldown = 0; p.angle = 0; p.aimAngle = 0;
+    g.input.mouse.down = true; g.update(1 / 60); g.input.mouse.down = false;
+    const b = g.bullets[0];
+    assert(b, '前置：已发射');
+    assert(b.age < CONFIG.BULLET.spawnOwnerImmune, '刚发射的炮弹处于保护期');
+    const px0 = p.x, py0 = p.y;
+    for (let i = 0; i < 20 && !b.dead; i++) g.update(1 / 60);   // 0.33s > 0.12s
+    if (!b.dead) {
+      assert(b.age >= CONFIG.BULLET.spawnOwnerImmune, '保护应随时间过期');
+      // 保护期满：把炮弹置回发射者位置（模拟反弹回来自伤）
+      b.x = p.x; b.y = p.y; b.dx = 0; b.dy = 0;
+      g.update(1 / 60);
+      assert(!p.alive, '保护期满后炮弹应能命中发射者');
+    }
+  });
+
+  test('自伤：直射路径不再豁免发射者（语义确认）', function () {
+    const g = freshGame('classic', 1);
+    const p = g.player;
+    // 构造一枚已过保护期的炮弹在玩家正前方 40px，向玩家飞行（入列后被正常驱动）
+    const b = new Bullet({ x: p.x + 40, y: p.y, angle: Math.PI, ownerId: p.id });
+    b.age = 1;                                          // 超过出生保护
+    g.bullets.push(b);
+    for (let i = 0; i < 10 && p.alive; i++) g.update(1 / 60);
+    assert(!p.alive, '飞向发射者的炮弹应命中（无永久豁免）');
+  });
+
+  test('恶魔难度：注册可枚举、参数完整、UI 键一致', function () {
+    assert(AI_DIFFICULTIES.demon && AI_DIFFICULTIES.demon.demon === true, 'demon 表项');
+    assert(AI_DIFFICULTIES.demon.name === '恶魔', '名称');
+    for (const k of ['speed', 'turnSpeed', 'fireCooldown', 'aimError', 'fireTolerance'])
+      assert(AI_DIFFICULTIES.demon[k] !== undefined, '缺少参数 ' + k);
+    assert(CONFIG.AI.demonLockRadius >= 500, '锁定范围应已配置');
+    // 原三难度未受影响（抽查关键字段）
+    assert(AI_DIFFICULTIES.normal.speed === 158 && AI_DIFFICULTIES.hard.fireCooldown === 1.0,
+      '原有难度参数不应变化');
+    assert(AI_DIFFICULTIES.normal.demon === undefined && AI_DIFFICULTIES.hard.demon === undefined,
+      '原难度不应带恶魔标志');
+    metrics['恶魔/参数'] = '锁定 ' + CONFIG.AI.demonLockRadius + 'px';
+  });
+
+  test('恶魔难度：范围内正常锁定追击；范围外不追踪（清情报巡逻）', function () {
+    const g = makeGame({ enemies: 1, difficulty: 'demon' });
+    const ai = g.aiControllers[0];
+    const tank = ai.tank;
+    assert(ai.diff.demon === true, '前置：AI 使用恶魔难度');
+    // 场景 A：玩家放近（确定无墙视线）→ 感知段应正常执行
+    g.maze = makeStubMaze();                    // 无墙：视线必通
+    g.tanks.forEach(function (t) { t.maze = g.maze; });
+    const p = g.player;
+    tank.x = 200; tank.y = 200;
+    p.x = 320; p.y = 200; p.alive = true;
+    ai.hasLos = false; ai.lastKnown = null; ai.intelConf = 0;
+    for (let i = 0; i < 10; i++) ai.update(1 / 60);
+    assert(ai.hasLos && ai.lastKnown !== null,
+      '范围内+有视线应获得玩家情报');
+    // 场景 B：玩家远在锁定范围外（无视线）→ 不应保留任何追踪情报
+    tank.x = 100; tank.y = 100;
+    p.x = g.maze.width - 80; p.y = g.maze.height - 80;
+    const farDist = Math.hypot(p.x - tank.x, p.y - tank.y);
+    assert(farDist > CONFIG.AI.demonLockRadius, '前置：超出锁定范围');
+    ai.hasLos = false; ai.lastKnown = null; ai.intelConf = 0;
+    for (let i = 0; i < 40; i++) ai.update(1 / 60);    // 跨过 think 节流间隔
+    assert(ai.lastKnown === null, '范围外不得获得/保留玩家位置情报');
+    assert(ai.state === 'wander', '范围外应巡逻而非追击，实际 ' + ai.state);
+    metrics['恶魔/锁定'] = '范围内锁定/范围外巡逻';
+  });
+
+  test('恶魔难度：敌方间误伤保留（碰撞过滤与目标选择解耦）', function () {
+    const g = makeGame({ enemies: 2, difficulty: 'demon' });
+    const e1 = g.tanks.find(function (t) { return !t.isPlayer; });
+    const e2 = g.tanks.filter(function (t) { return !t.isPlayer; })[1];
+    g.aiControllers.length = 0;
+    g.maze = makeStubMaze();                    // 无墙空场：弹道纯直线，与地图无关
+    g.tanks.forEach(function (t) { t.maze = g.maze; });
+    e1.x = 200; e1.y = 300; e2.x = 380; e2.y = 300;
+    g.player.x = 200; g.player.y = 120;         // 玩家挪出弹道
+    g.player.invuln = 9999;
+    e1.angle = e1.aimAngle = 0; e1.cooldown = 0;
+    const shots = e1.fire(g);
+    g.bullets.push.apply(g.bullets, shots);
+    for (let i = 0; i < 120 && e2.alive; i++) g.update(1 / 60);
+    assert(!e2.alive, '恶魔难度下敌方炮弹仍应伤害其他敌方');
+  });
+
+  test('恶魔难度：重开/重建敌人后规则正确重置', function () {
+    const g = makeGame({ enemies: 2, difficulty: 'demon' });
+    for (const ai of g.aiControllers) assert(ai.diff.demon === true, '开局应使用恶魔配置');
+    g.restart();
+    for (const ai of g.aiControllers) assert(ai.diff.demon === true, '重开后仍为恶魔');
+    assert(g.aiControllers.length === g.tanks.length - 1, '敌人数量不变');
+  });
+
   const failed = results.filter(r => !r.ok).length;
   return { total: results.length, failed, results, metrics };
 })();
