@@ -54,11 +54,21 @@
 
     /* ---------- 工具 ---------- */
     function aimMouseAt(wx, wy) {
-      const sp = iso.project(wx, wy, 0);
+      // 3D 模式用 3D 相机投影（视野拉近后与等距投影刻意不同）；2D 回退用等距。
+      // 传送后 3D 相机可能未同步（frame 在 render 时才跟随）——先渲染一帧对齐
+      let sx, sy;
+      if (P3 && P3.project) {
+        game.render();
+        const sp = P3.project(wx, wy);
+        sx = sp.x; sy = sp.y;
+      } else {
+        const sp = iso.project(wx, wy, 0);
+        sx = sp.x - game.camera.x; sy = sp.y - game.camera.y;
+      }
       const rect = game.canvas.getBoundingClientRect();
       window.dispatchEvent(new PointerEvent('pointermove', {
-        clientX: sp.x - game.camera.x + rect.left,
-        clientY: sp.y - game.camera.y + rect.top,
+        clientX: sx + rect.left,
+        clientY: sy + rect.top,
         bubbles: true
       }));
     }
@@ -345,13 +355,23 @@
         game.update(1 / 60);
         if (b.bounces > before.n) {
           bounced = true;
-          // 反弹点应贴邻墙面：四向射线量最近距离（拐角分离余量按 13 图实测 ≤10px）
+          // 反弹点应贴邻墙面：点到墙矩形的精确距离（角擦反射时轴射线会漏测，
+          // 矩形距离对角尖同样准确）
           let near = 1e9;
-          for (const [ax, ay] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-            const h = game.maze.raycast(b.x, b.y, ax, ay, 60, 0);
-            if (h) near = Math.min(near, h.t);
+          for (const w of game.maze.queryWalls(b.x, b.y, 14)) {
+            const dx = Math.max(w.x - b.x, 0, b.x - (w.x + w.w));
+            const dy = Math.max(w.y - b.y, 0, b.y - (w.y + w.h));
+            near = Math.min(near, Math.hypot(dx, dy));
           }
           posErr = near;
+          if (near > 10) {
+            results.push('INFO | E-诊断 弹=(' + b.x.toFixed(0) + ',' + b.y.toFixed(0)
+              + ') 速度=(' + b.dx.toFixed(1) + ',' + b.dy.toFixed(1) + ') bounces=' + b.bounces
+              + ' 四向t=' + [[1, 0], [-1, 0], [0, 1], [0, -1]].map(([ax, ay]) => {
+                const hh = game.maze.raycast(b.x, b.y, ax, ay, 400, 0);
+                return hh ? hh.t.toFixed(0) : '∞';
+              }).join(','));
+          }
           // 通用反射定律（不预设撞击面）：轴对齐面=单分量镜像；柱角=双分量镜像；
           // 速率守恒；反弹点不嵌入任何墙
           const mirrorX = Math.abs(b.dx + before.dx) < 1e-6 && Math.abs(b.dy - before.dy) < 1e-6;
@@ -528,9 +548,15 @@
           standOk = game.maze.isFree(p.x, p.y, p.radius - 0.5);
           game.camera.follow(p.x, p.y, game.maze.width, game.maze.height);
           if (game.isoActive) game.followIsoCamera();
-          const cx = game.maze.width / 2 - p.x, cy = game.maze.height / 2 - p.y;
-          const ca = Math.atan2(cy, cx);
-          aimMouseAt(p.x + Math.cos(ca) * 300, p.y + Math.sin(ca) * 300);
+          // 朝最开阔方向机动（角落点朝地图中心的直线上常有墙）
+          let bestA = 0, bestT = -1;
+          for (let k = 0; k < 8; k++) {
+            const a = k * Math.PI / 4;
+            const h = game.maze.raycast(p.x, p.y, Math.cos(a), Math.sin(a), 400, p.radius + 2);
+            const t = h ? h.t : 400;
+            if (t > bestT) { bestT = t; bestA = a; }
+          }
+          aimMouseAt(p.x + Math.cos(bestA) * 300, p.y + Math.sin(bestA) * 300);
           const fx = p.x, fy = p.y;
           for (let s = 0; s < 90; s++) game.update(1 / 60);
           moveOk = Math.hypot(p.x - fx, p.y - fy) > 30;

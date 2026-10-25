@@ -1487,8 +1487,9 @@ class Game {
   renderMinimap(ctx, W, H) {
     const maze = this.maze;
     if (!maze) return;
-    // 世界没有超出视口（整图可见）时不显示小地图
-    if (maze.width <= this.viewW && maze.height <= this.viewH) return;
+    // 世界没有超出视口（整图可见）时不显示小地图；
+    // forceMinimap：3D 视图拉近后即使小图也非整图可见（由 3D 层置位，2D 原版不受影响）
+    if (!this.forceMinimap && maze.width <= this.viewW && maze.height <= this.viewH) return;
 
     const pad = 18;
     const mw = Math.min(196, W * 0.22);
@@ -1531,12 +1532,16 @@ class Game {
     ctx.strokeStyle = T.accentLine;
     ctx.lineWidth = 1.4;
     if (this.isoActive && this.iso) {
-      const cs = [
-        this.iso.unproject(cam.x, cam.y),
-        this.iso.unproject(cam.x + this.viewW, cam.y),
-        this.iso.unproject(cam.x + this.viewW, cam.y + this.viewH),
-        this.iso.unproject(cam.x, cam.y + this.viewH)
-      ];
+      // 视野四边形：3D 拉近时用 3D 层提供的真实可见区（viewWorldRect），
+      // 缺省回退等距窗口四角逆投影
+      const cs = (this.viewWorldRect && this.viewWorldRect.length === 4)
+        ? this.viewWorldRect
+        : [
+          this.iso.unproject(cam.x, cam.y),
+          this.iso.unproject(cam.x + this.viewW, cam.y),
+          this.iso.unproject(cam.x + this.viewW, cam.y + this.viewH),
+          this.iso.unproject(cam.x, cam.y + this.viewH)
+        ];
       ctx.beginPath();
       for (let i = 0; i < 4; i++) {
         const px = mx + cs[i].x * sx, py = my + cs[i].y * sy;

@@ -32,6 +32,7 @@ import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js'
   const PX = 10;                                    // 1 three 单位 = 10 游戏像素
   const q = new URLSearchParams(location.search);
   const ENABLED = q.get('proto3d') !== '0';
+  const VIEW_ZOOM = Math.max(1, parseFloat(q.get('zoom') || '1.6'));  // 3D 视野拉近倍率
 
   const report = {
     webgl: false, glb: 'pending', kit: 'pending', mode: ENABLED ? '3d' : 'off',
@@ -466,6 +467,12 @@ import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js'
 
     /* ---------- 测试快照 API（读渲染层真实状态，供自动化验收） ---------- */
 
+    /** 世界坐标 → 屏幕像素（3D 相机投影；缩放/取景无关的瞄准基准） */
+    report.project = function (wx, wy) {
+      projV.set(wx / PX, 0, wy / PX).project(camera);
+      return { x: (projV.x * 0.5 + 0.5) * game.viewW, y: (-projV.y * 0.5 + 0.5) * game.viewH };
+    };
+
     const muzzleV = new THREE.Vector3();
     report.getSnapshot = function () {
       const tanks = [];
@@ -556,7 +563,9 @@ import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js'
         tmpV.set(cw.x / PX, 0, cw.y / PX);
         camera.position.copy(tmpV).addScaledVector(camDir, 200);
         camera.lookAt(tmpV);
-        const pxPerUnit = Math.SQRT2 * iso.u * PX;
+        // 视野拉近：正交视口按 VIEW_ZOOM 缩小（世界可见区变小、细节放大）；
+        // ?zoom= 可调（1=与等距版一致）。输入映射走 3D 射线逆投影，天然一致
+        const pxPerUnit = Math.SQRT2 * iso.u * PX * VIEW_ZOOM;
         const top = game.viewH / (2 * pxPerUnit);
         if (Math.abs(camera.top - top) > 1e-6 || camera.aspect !== game.viewW / game.viewH) {
           camera.top = top; camera.bottom = -top;
@@ -567,6 +576,13 @@ import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js'
         }
       }
       if (game.input.viewMapper !== viewMapper3d) game.input.setViewMapper(viewMapper3d);
+
+      /* 3D 视野供数：小地图常驻 + 真实可见区四边形（屏幕四角落地逆投影） */
+      game.forceMinimap = true;
+      game.viewWorldRect = [
+        viewMapper3d(0, 0), viewMapper3d(game.viewW, 0),
+        viewMapper3d(game.viewW, game.viewH), viewMapper3d(0, game.viewH)
+      ];
 
       /* 坦克（实例复用：坦克数动态增减，池跟随 game.tanks） */
       if (protoRoot && !menu) {
@@ -690,18 +706,22 @@ import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js'
       report.tris = renderer.info.render.triangles;   // 性能记录（验收用）
       report.calls = renderer.info.render.calls;
 
-      /* 数值对照（信息性：3D 投影 vs 等距投影；输入映射 vs 等距映射） */
+      /* 数值对照（信息性：3D 投影 vs 等距投影；输入映射 vs 等距映射）。
+       * 视野拉近（VIEW_ZOOM）后两投影刻意不同：把等距点向视口中心按
+       * 1/zoom 归一再比，差值才反映投影几何差而非缩放 */
       if (!menu && game.player && game.player.alive) {
         const p = game.player;
         projV.set(p.x / PX, 0, p.y / PX).project(camera);
         const px = (projV.x * 0.5 + 0.5) * game.viewW;
         const py = (-projV.y * 0.5 + 0.5) * game.viewH;
         const ip = iso.project(p.x, p.y, 0);
-        report.dProjPx = Math.max(Math.abs(px - (ip.x - game.camera.x)),
-          Math.abs(py - (ip.y - game.camera.y))).toFixed(1);
-        const a = viewMapper3d(game.input.mouse.canvasX, game.input.mouse.canvasY);
-        const b = iso.unprojectAt(game.input.mouse.canvasX, game.input.mouse.canvasY, game.camera);
-        report.dInputPx = Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y)).toFixed(1);
+        const ix = game.viewW / 2 + (ip.x - game.camera.x - game.viewW / 2) / VIEW_ZOOM;
+        const iy = game.viewH / 2 + (ip.y - game.camera.y - game.viewH / 2) / VIEW_ZOOM;
+        report.dProjPx = Math.max(Math.abs(px - ix), Math.abs(py - iy)).toFixed(1);
+        // 输入映射精度：世界→屏幕→世界往返闭合差（缩放无关）
+        const sp = report.project(p.x, p.y);
+        const rt = viewMapper3d(sp.x, sp.y);
+        report.dInputPx = Math.max(Math.abs(rt.x - p.x), Math.abs(rt.y - p.y)).toFixed(1);
       }
 
       /* 状态面板（首帧立即刷新；无面板则静默） */
