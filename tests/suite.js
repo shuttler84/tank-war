@@ -2241,6 +2241,258 @@
     assert(CONFIG.ISO.heightK < 0.5, '墙高应已压低以减少走廊遮挡');
   });
 
+
+  /* =========================================================
+   * 连射机制（CONFIG.FIRE）：普通 5/0.45s/1.2s · 强化反弹 6 · 连射过载 10/0.15s/0.3s
+   * 全部按实际时间（dt 秒累计）验证；对局路径为真实玩家输入管线（mouse.down + update）
+   * ========================================================= */
+
+  function burstGame() {
+    const g = soloPlayer();
+    g.pickups.length = 0; g.pickupTimer = 9999;        // stub 迷宫无 openness，冻结刷新
+    const stamps = [];
+    const tank = g.player;
+    const origFire = tank.fire.bind(tank);
+    tank.fire = function (game) {
+      const r = origFire(game);
+      if (r && r.length && tank.powerup === null) stamps.push(+g.time.toFixed(4));
+      return r;
+    };
+    return { g: g, tank: tank, stamps: stamps };
+  }
+
+  test('连射：普通状态一轮最多 5 发，按住不可绕过', function () {
+    const bg = burstGame(), g = bg.g, tank = bg.tank, stamps = bg.stamps;
+    g.input.mouse.down = true;
+    for (let i = 0; i < 360; i++) g.update(1 / 60);
+    assert(stamps.length === 5, '按住 6 秒应恰好发射 5 发，实际 ' + stamps.length);
+    assert(tank.needRelease === true, '轮末应要求松开扳机');
+    metrics['连射/普通一轮'] = stamps.length + ' 发';
+  });
+
+  test('连射：普通状态相邻发射间隔不小于 0.45s（实际时间）', function () {
+    const bg = burstGame(), stamps = bg.stamps, g = bg.g;
+    g.input.mouse.down = true;
+    for (let i = 0; i < 400; i++) g.update(1 / 60);
+    assert(stamps.length === 5, '前置：一轮 5 发');
+    for (let i = 1; i < stamps.length; i++)
+      assert(stamps[i] - stamps[i - 1] >= 0.45 - 1e-6,
+        '第 ' + i + ' 发间隔 ' + (stamps[i] - stamps[i - 1]).toFixed(3) + 's < 0.45s');
+    metrics['连射/普通间隔'] = (stamps[1] - stamps[0]).toFixed(3) + 's';
+  });
+
+  test('连射：第 5 发后 1.2s 冷却，冷却中点按不发射，期满开新一轮', function () {
+    const bg = burstGame(), g = bg.g, stamps = bg.stamps;
+    g.input.mouse.down = true;
+    for (let i = 0; i < 115; i++) g.update(1 / 60);     // 恰好打满一轮（第5发≈1.87s）
+    assert(stamps.length === 5, '前置：一轮 5 发');
+    for (let i = 0; i < 45; i++) {                      // 冷却期内点按（至≈2.67s<3.07s）
+      g.input.mouse.down = i % 2 === 0;
+      g.update(1 / 60);
+    }
+    assert(stamps.length === 5, '冷却期内不得追加发射');
+    g.input.mouse.down = true;
+    for (let i = 0; i < 15; i++) g.update(1 / 60);      // ≈2.92s，仍差 9 帧到期
+    assert(stamps.length === 5, '冷却未满不得发射');
+    for (let i = 0; i < 10; i++) g.update(1 / 60);      // 跨过 3.07s
+    assert(stamps.length === 6, '冷却期满后应开始新一轮');
+    metrics['连射/轮末冷却'] = '1.2s 内 0 发';
+  });
+
+  test('连射：轮末须松开再按；快速连点不绕过间隔与上限', function () {
+    const bg = burstGame(), g = bg.g, stamps = bg.stamps;
+    for (let i = 0; i < 300; i++) {
+      g.input.mouse.down = i % 2 === 0;
+      g.update(1 / 60);
+    }
+    assert(stamps.length >= 9 && stamps.length <= 10,
+      '快速连点 5s 应为 5+冷却+第二轮（9~10 发），实际 ' + stamps.length);
+    for (let i = 1; i < stamps.length; i++)
+      assert(stamps[i] - stamps[i - 1] >= 0.45 - 1e-6, '连点绕过了最小间隔');
+  });
+
+  test('连射：强化反弹一轮 6 发且子弹保留反弹强化', function () {
+    const bg = burstGame(), g = bg.g, tank = bg.tank, stamps = bg.stamps;
+    tank.applyPickup('bouncer');
+    assert(tank.bounceAmmo > 0, '前置：拾取强化反弹');
+    const innerFire = tank.fire.bind(tank);             // 在发射时刻捕获强化（子弹随后出界不影响断言）
+    let boosted = 0;
+    tank.fire = function (game) {
+      const r = innerFire(game);
+      if (r) for (let k = 0; k < r.length; k++) if (r[k].enhanced) boosted++;   // Bullet 以 enhanced/maxBounces 记录
+      return r;
+    };
+    g.input.mouse.down = true;
+    for (let i = 0; i < 170; i++) g.update(1 / 60);     // ≈2.83s：6 发已打满
+    assert(stamps.length === 6, '强化反弹一轮应 6 发，实际 ' + stamps.length);
+    assert(boosted === 6, '6 发均应带额外反弹次数（原有强化保留），实际 ' + boosted);
+    metrics['连射/强化反弹一轮'] = stamps.length + ' 发';
+  });
+
+  test('连射：连射过载 10 发 / 0.15s 间隔 / 0.3s 冷却', function () {
+    const bg = burstGame(), g = bg.g, tank = bg.tank, stamps = bg.stamps;
+    tank.applyPickup('rapid');
+    g.input.mouse.down = true;
+    for (let i = 0; i < 100; i++) g.update(1 / 60);
+    assert(stamps.length === 10, '过载一轮应 10 发，实际 ' + stamps.length);
+    let minGap = 9;
+    for (let i = 1; i < stamps.length; i++) minGap = Math.min(minGap, stamps[i] - stamps[i - 1]);
+    assert(minGap >= 0.15 - 1e-6, '过载间隔 < 0.15s: ' + minGap.toFixed(3));
+    g.input.mouse.down = false;
+    for (let i = 0; i < 19; i++) g.update(1 / 60);
+    assert(stamps.length === 10, '0.3s 冷却内不得发射');
+    g.input.mouse.down = true;
+    for (let i = 0; i < 3; i++) g.update(1 / 60);
+    assert(stamps.length === 11, '0.3s 冷却后应能开新一轮（过载 6s 仍在）');
+    metrics['连射/过载'] = '10 发 · 最小间隔 ' + minGap.toFixed(2) + 's';
+  });
+
+  test('连射：过载与强化反弹共存时过载定参数、反弹保留', function () {
+    const bg = burstGame(), g = bg.g, tank = bg.tank, stamps = bg.stamps;
+    tank.applyPickup('rapid');
+    tank.applyPickup('bouncer');
+    const innerFire2 = tank.fire.bind(tank);
+    let boosted2 = 0;
+    tank.fire = function (game) {
+      const r = innerFire2(game);
+      if (r) for (let k = 0; k < r.length; k++) if (r[k].enhanced) boosted2++;
+      return r;
+    };
+    g.input.mouse.down = true;
+    for (let i = 0; i < 100; i++) g.update(1 / 60);
+    assert(stamps.length === 10, '共存应按过载 10 发，实际 ' + stamps.length);
+    assert(boosted2 === CONFIG.PICKUPS.bouncerShots, '共存时反弹强化应覆盖弹药份数（6 发），实际 ' + boosted2);
+    let maxGap = 0;
+    for (let i = 1; i < stamps.length; i++) maxGap = Math.max(maxGap, stamps[i] - stamps[i - 1]);
+    assert(maxGap <= 0.15 + 2 / 60, '共存轮内间隔应按过载 0.15s（含两帧量化/浮点余量），实测最大 ' + maxGap.toFixed(3));
+  });
+
+  test('连射：道具中途生效不重置计数不追加额度', function () {
+    const bg = burstGame(), g = bg.g, tank = bg.tank, stamps = bg.stamps;
+    g.input.mouse.down = true;
+    for (let i = 0; i < 99; i++) g.update(1 / 60);
+    const before = stamps.length;
+    tank.applyPickup('rapid');
+    for (let i = 0; i < 60; i++) g.update(1 / 60);
+    assert(stamps.length <= 10, '中途生效不得突破过载上限 10，实际 ' + stamps.length);
+    assert(stamps.length > before, '中途生效应允许继续至新上限');
+  });
+
+  test('连射：道具到期使计数超限按轮末处理（不加发不冻结）', function () {
+    const bg = burstGame(), g = bg.g, tank = bg.tank, stamps = bg.stamps;
+    tank.applyPickup('rapid');
+    g.input.mouse.down = true;
+    for (let i = 0; i < 55; i++) g.update(1 / 60);
+    const mid = stamps.length;
+    assert(mid >= 6, '前置：过载中已发射');
+    tank.rapidTime = 0.001;
+    for (let i = 0; i < 120; i++) {
+      if (i === 30) g.input.mouse.down = false;
+      if (i === 90) g.input.mouse.down = true;
+      g.update(1 / 60);
+    }
+    assert(stamps.length >= mid, '到期不得回滚计数');
+    assert(stamps.length <= mid + 6, '到期后不得持续按过载节奏追加');
+    const tail = stamps.slice(mid);
+    for (let i = 1; i < tail.length; i++)
+      assert(tail[i] - tail[i - 1] >= 0.45 - 1e-6, '到期后新发应按普通间隔');
+  });
+
+  test('连射：到期回落、反弹耗尽回落、重生与重开复位', function () {
+    const bg = burstGame(), g = bg.g, tank = bg.tank, stamps = bg.stamps;
+    tank.applyPickup('rapid');
+    tank.rapidTime = 0;
+    g.update(1 / 60);
+    assert(tank.fireParams().limit === CONFIG.FIRE.burst, '过载到期应回落普通上限');
+    tank.applyPickup('bouncer');
+    assert(tank.fireParams().limit === CONFIG.FIRE.burstBouncer, '强化反弹应提升至 6');
+    tank.bounceAmmo = 0;
+    assert(tank.fireParams().limit === CONFIG.FIRE.burst, '反弹耗尽应回落 5');
+    tank.burstShots = 5; tank.needRelease = true; tank.burstCooldown = true;
+    tank.alive = false;
+    g.respawnTimer = 0.001;
+    for (let i = 0; i < 12; i++) g.update(1 / 60);
+    assert(tank.alive === true, '前置：已重生');
+    assert(tank.burstShots === 0 && tank.needRelease === false, '重生应复位连射状态');
+    g.input.mouse.down = true;
+    g.update(1 / 60);
+    assert(stamps.length === 1, '重生后应立即可开新一轮');
+    const g2 = makeGame({ enemies: 1 });
+    assert(g2.player.burstShots === 0 && g2.player.needRelease === false, '重开应复位连射状态');
+  });
+
+  test('连射：AI 坦克遵循单轮上限与自身节奏下限', function () {
+    const g = makeGame({ enemies: 1, difficulty: 'normal' });
+    const ai = g.tanks.find(function (t) { return !t.isPlayer; });
+    g.aiControllers.length = 0;
+    const aiStamps = [];
+    const origFire = ai.fire.bind(ai);
+    let aiClock = 0;                                    // 本地时钟（此处只驱动坦克层）
+    ai.fire = function (game) {
+      const r = origFire(game);
+      if (r && r.length && ai.powerup === null) aiStamps.push(+aiClock.toFixed(4));
+      return r;
+    };
+    let burstCount = 0;
+    for (let i = 0; i < 720; i++) {
+      // 模拟 AI wantFire 脉冲：周期性松开（满足轮末释放要求，符合真实 AI 行为）
+      const want = (i % 9) !== 8;
+      if (ai.updateFireGate(want) && want) {
+        const shots = ai.fire(g);
+        for (let k = 0; k < shots.length; k++) g.bullets.push(shots[k]);
+        burstCount++;
+      }
+      ai.update(1 / 60, g.maze);
+      aiClock += 1 / 60;
+    }
+    assert(burstCount >= 5, 'AI 应能完成一轮 5 发');
+    for (let i = 1; i < aiStamps.length; i++) {
+      const gap = aiStamps[i] - aiStamps[i - 1];
+      assert(gap >= 0.45 - 1e-6, 'AI 相邻发射间隔低于任务下限: ' + gap.toFixed(3));
+      assert(gap >= 0.99, 'AI 自身节奏（1.0s）应保持: ' + gap.toFixed(3));
+    }
+    // 12s 内总发数应符合"5 发/轮 + 轮末冷却 + 1.0s 节奏"的约束（不超过 5 发 + 两轮）
+    assert(burstCount <= 11, 'AI 总发数异常偏高: ' + burstCount);
+    metrics['连射/AI'] = burstCount + ' 发/12s（节奏 ' + (aiStamps[1] - aiStamps[0]).toFixed(2) + 's）';
+  });
+
+  test('连射：帧率无关——1/30 与 1/240 步进发射时刻一致', function () {
+    function runAt(dt) {
+      const bg = burstGame(), g = bg.g, stamps = bg.stamps;
+      g.input.mouse.down = true;
+      let t = 0;
+      while (t < 3.0 - 1e-9) { g.update(dt); t += dt; }
+      return stamps;
+    }
+    const a = runAt(1 / 30), b = runAt(1 / 240);
+    assert(a.length === b.length && a.length === 5, '两种步进都应恰好 5 发: ' + a.length + '/' + b.length);
+    // 各自步进内：间隔 ≥0.45s 且 ≤ 0.45+一个步长（发射时刻量化到帧网格是离散固有；
+    // 若实现按帧数计数，30fps 的间隔会变成 0.9s，立即违反上界）
+    for (let i = 1; i < a.length; i++) {
+      const gap = a[i] - a[i - 1];
+      assert(gap >= 0.45 - 1e-6 && gap <= 0.45 + 1 / 30 + 1e-6,
+        '30fps 间隔 ' + gap.toFixed(3) + 's 不在实际时间约束内');
+    }
+    for (let i = 1; i < b.length; i++) {
+      const gap = b[i] - b[i - 1];
+      assert(gap >= 0.45 - 1e-6 && gap <= 0.46,   // 上界含浮点累计余量；帧数耦合会是 0.9
+        '240fps 间隔 ' + gap.toFixed(3) + 's 不在实际时间约束内');
+    }
+    metrics['连射/帧率无关'] = '30fps vs 240fps 一致';
+  });
+
+  test('连射：武器替换期间维持原冷却语义不消耗连射计数', function () {
+    const bg = burstGame(), g = bg.g, tank = bg.tank, stamps = bg.stamps;
+    tank.applyPickup('triple');
+    g.input.mouse.down = true;
+    for (let i = 0; i < 180; i++) g.update(1 / 60);
+    assert(stamps.length === 0, '武器不记入普通连射计数');
+    assert(g.bullets.length >= 3, '三连发应正常发射');
+    tank.powerupTime = 0.001; tank.powerup = null; tank.cooldown = 0;
+    for (let i = 0; i < 130; i++) g.update(1 / 60);
+    assert(stamps.length >= 1, '武器结束后普通炮弹应可继续发射');
+  });
+
   const failed = results.filter(r => !r.ok).length;
   return { total: results.length, failed, results, metrics };
 })();

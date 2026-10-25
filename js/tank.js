@@ -43,6 +43,36 @@ class Tank {
     this.radarTime = 0;       // 雷达扫描剩余时间
     this.empStun = 0;         // 被 EMP 干扰的剩余时间
     this.radarPinged = false; // 雷达是否已触发过探测（AI 用）
+    /* ---- 连射机制状态（普通炮弹；参数见 CONFIG.FIRE） ---- */
+    this.burstShots = 0;      // 本轮已发射发数
+    this.burstCooldown = false; // 当前 cooldown 是否为轮末冷却（到期即重置计数）
+    this.needRelease = false; // 轮末后须松开扳机再按下才能开下一轮
+  }
+
+  /** 当前生效的连射参数（动态计算，不写入基础属性）：
+   *  连射过载 > 强化反弹 > 普通；武器替换（powerup）不适用连射门控 */
+  fireParams() {
+    const F = CONFIG.FIRE;
+    if (this.rapidTime > 0) return { limit: F.burstRapid, interval: F.intervalRapid, post: F.cooldownBurstRapid };
+    if (this.bounceAmmo > 0) return { limit: F.burstBouncer, interval: F.interval, post: F.cooldownBurst };
+    return { limit: F.burst, interval: F.interval, post: F.cooldownBurst };
+  }
+
+  /** 连射门控（玩家/AI 的开火扳机统一走这里）：
+   *  - 武器替换期间维持原语义（仅冷却限制）；
+   *  - 普通炮弹：间隔（cooldown）+ 单轮上限 + 轮末须松开再按 */
+  updateFireGate(wantFire) {
+    if (!wantFire) { this.needRelease = false; return false; }
+    if (this.powerup) return this.cooldown <= 0;
+    if (this.needRelease || this.cooldown > 0) return false;
+    return this.burstShots < this.fireParams().limit;
+  }
+
+  /** 连射状态复位（重生/重开时调用） */
+  resetBurst() {
+    this.burstShots = 0;
+    this.burstCooldown = false;
+    this.needRelease = false;
   }
 
   /** 开火冷却：受连射过载影响，并设置下限防止无限射速 */
@@ -62,6 +92,17 @@ class Tank {
   update(dt, maze) {
     if (!this.alive) return;
     if (this.cooldown > 0) this.cooldown = Math.max(0, this.cooldown - dt);
+    // 连射：轮末冷却到期 → 重置本轮计数；道具中途失效使计数已达新上限 →
+    // 同样按轮末处理（不重置计时、不追加发射额度）
+    if (this.burstCooldown && this.cooldown <= 0) {
+      this.burstShots = 0;
+      this.burstCooldown = false;
+    } else if (!this.burstCooldown && this.cooldown <= 0 && this.powerup === null
+      && this.burstShots > 0 && this.burstShots >= this.fireParams().limit) {
+      this.cooldown = Math.max(this.fireParams().post, this.effectiveCooldown(this.fireCooldown));
+      this.burstCooldown = true;
+      this.needRelease = true;
+    }
     if (this.spawnFlash > 0) this.spawnFlash = Math.max(0, this.spawnFlash - dt);
     if (this.invuln > 0) this.invuln = Math.max(0, this.invuln - dt);
     if (this.powerupTime > 0) {
@@ -205,6 +246,17 @@ class Tank {
         color: this.colors.body,
         extraBounces
       }));
+      // 连射节奏（普通炮弹）：计数；间隔/轮末冷却取任务参数与坦克自身
+      // 冷却的较大者（保持 AI 节奏与既有强化下限不被缩短绕过）
+      const P = this.fireParams();
+      this.burstShots++;
+      if (this.burstShots >= P.limit) {
+        this.cooldown = Math.max(P.post, this.cooldown);
+        this.burstCooldown = true;
+        this.needRelease = true;
+      } else {
+        this.cooldown = Math.max(P.interval, this.cooldown);
+      }
     }
 
     // 一次齐射消耗 1 发强化反弹弹药

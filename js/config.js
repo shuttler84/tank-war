@@ -80,8 +80,20 @@ const CONFIG = {
     maxBounces: 3,        // 最大反弹次数
     maxAge: 6,            // 最长存活时间（秒）
     substep: 5,           // 单次碰撞检测最大位移，防止穿透薄墙
-    playerCooldown: 0.26, // 玩家射击冷却（秒）
+    playerCooldown: 0.26, // 玩家射击冷却（秒，普通炮弹的自身节奏下限）
     trailPoints: 16
+  },
+
+  /* 连射机制（普通炮弹；按实际时间计，单位秒）
+   * 连射过载生效时优先适用其行；强化反弹只提升单轮上限（反弹强化照旧） */
+  FIRE: {
+    burst: 5,             // 普通状态单轮连射上限
+    burstBouncer: 6,      // 强化反弹生效时单轮上限
+    burstRapid: 10,       // 连射过载生效时单轮上限
+    interval: 0.45,       // 相邻两发最小发射间隔（普通/强化反弹）
+    intervalRapid: 0.15,  // 连射过载时间隔
+    cooldownBurst: 1.2,   // 单轮结束后的冷却（普通/强化反弹）
+    cooldownBurstRapid: 0.3 // 连射过载时轮末冷却
   },
 
   /* 比赛规则 */

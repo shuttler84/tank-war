@@ -904,8 +904,10 @@ class AIController {
 
   tryFire() {
     const tank = this.tank, game = this.game;
+    // 连射门控（AI 的 wantFire 自然脉冲即"松开再按"，满足轮末释放要求）
+    const gate = tank.updateFireGate(this.wantFire && tank.alive);
     if (!this.wantFire || !tank.alive) return;
-    if (tank.cooldown > 0) return;
+    if (!gate) return;
     if (Math.abs(angleDiff(tank.angle, this.fireAngle)) > this.diff.fireTolerance) return;
     if (this.hasLos && game.time - this.losAcquiredAt < this.fireDelay) return;
 

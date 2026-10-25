@@ -471,9 +471,10 @@ class Game {
     for (let i = 0; i < this.tanks.length; i++) this.tanks[i].update(dt, this.maze);
     this.separateTanks();
 
-    // 玩家射击
-    if (this.state === 'playing' && this.player.alive && this.input.mouse.down) {
-      if (this.player.cooldown <= 0) {
+    // 玩家射击（连射门控：按住不可绕过单轮上限/间隔/冷却，轮末须松开再按）
+    {
+      const hold = this.state === 'playing' && this.player.alive && this.input.mouse.down;
+      if (this.player.updateFireGate(hold)) {
         const shots = this.player.fire(this);
         if (shots && shots.length) {
           for (let i = 0; i < shots.length; i++) this.bullets.push(shots[i]);
@@ -648,6 +649,7 @@ class Game {
     p.y = spot.y;
     p.alive = true;
     p.cooldown = 0;
+    p.resetBurst();          // 连射计数/轮末状态随重生复位
     p.moveIntent = 0;
     p.speed = 0;
     p.invuln = CONFIG.RULES.respawnInvuln;
