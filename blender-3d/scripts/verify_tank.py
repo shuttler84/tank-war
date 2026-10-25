@@ -74,13 +74,23 @@ if root and objs["Barrel"]:
           "TurretPivot" in chain and "ToyTank" in chain, str(chain))
 
 # ---- 2) 尺寸与触地 ----
+# 长度含延长炮管：前缘炮尖 1.846 + 后缘负重轮 0.76 ≈ 2.61 局部 × 1.3 ≈ 3.39 单位
 lo, hi, mesh_count = subtree_center([root])
 dims = (hi.x - lo.x, hi.y - lo.y, hi.z - lo.z)
-check("dims_length_2.6", abs(dims[1] - 2.6) < 0.15, "len=%.3f" % dims[1])
+check("dims_length_~3.39", abs(dims[1] - 3.39) < 0.15, "len=%.3f" % dims[1])
 check("dims_width_~2.0", abs(dims[0] - 2.0) < 0.25, "wid=%.3f" % dims[0])
 check("dims_height_budget", dims[2] <= 1.5, "hgt=%.3f" % dims[2])
 check("ground_contact", abs(lo.z) < 0.03, "zmin=%.3f" % lo.z)
 print("       dims=(%.2f, %.2f, %.2f) meshes=%d" % (dims + (mesh_count,)))
+
+# ---- 2b) 炮口标定：炮尖距车中心 = 24 游戏像素（CONFIG.TANK.muzzleOffset） ----
+muzzle = objs["MuzzleBrake"] if "MuzzleBrake" in objs else find("MuzzleBrake")
+if muzzle:
+    mw = muzzle.matrix_world
+    ys = [(mw @ mathutils.Vector(c)).y for c in muzzle.bound_box]
+    tip_dist = -min(ys)                          # 车头朝 -Y，炮尖是最小 Y 角
+    check("muzzle_at_24px", abs(tip_dist - 2.4) < 0.05,
+          "tip=%.3f units (%.1f px)" % (tip_dist, tip_dist * 10))
 
 # ---- 3) 炮塔轴心与炮管跟随（数值证明） ----
 bpy.context.view_layer.update()

@@ -211,34 +211,34 @@ scene.collection.objects.link(barrel_pivot)   # 必须链接进集合，否则�
 barrel_pivot.location = (0, -0.10, 0.86)      # 炮塔中轴上部（预留俯仰轴）
 reparent(barrel_pivot, turret_pivot)
 
-bpy.ops.mesh.primitive_cylinder_add(vertices=14, radius=0.075, depth=1.0,
-                                    location=(0, -0.66, 0.86), rotation=(math.radians(90), 0, 0))
+bpy.ops.mesh.primitive_cylinder_add(vertices=14, radius=0.075, depth=1.686,
+                                    location=(0, -1.003, 0.86), rotation=(math.radians(90), 0, 0))
 barrel = bpy.context.active_object
 barrel.name = "Barrel"                        # 沿 -Y 伸出，根部藏于防盾内
 set_single_material(barrel, "TankBarrel")
 reparent(barrel, barrel_pivot)
 
 bpy.ops.mesh.primitive_cylinder_add(vertices=14, radius=0.105, depth=0.16,
-                                    location=(0, -1.16, 0.86), rotation=(math.radians(90), 0, 0))
+                                    location=(0, -1.766, 0.86), rotation=(math.radians(90), 0, 0))
 muzzle = bpy.context.active_object
 muzzle.name = "MuzzleBrake"
 set_single_material(muzzle, "TankMuzzle")
 reparent(muzzle, barrel_pivot)
 
-# ---------- 6. 归一化尺寸：长(Y)=2.6，地面 z=0 ----------
+# ---------- 6. 固定比例：1 Blender 单位 × 1.3 = 13 游戏像素 ----------
+# 目标（炮口标定）：炮管尖端距车中心 = 24 游戏像素 = 2.4 单位（CONFIG.TANK.muzzleOffset）
+#   尖端局部 y = -1.846 → ×1.3001 ≈ 2.40 单位 ✓；车身(侧裙)长 1.9×1.3 = 24.7px ≈ 逻辑 hull 26px
 
 bpy.context.view_layer.update()
 lo, hi = world_bbox([root])
-length = hi.y - lo.y
-scale = 2.6 / length
-root.scale = (scale, scale, scale)
+root.scale = (1.3001, 1.3001, 1.3001)
 bpy.context.view_layer.update()
 lo, hi = world_bbox([root])
 root.location.z -= lo.z                      # 触地
 bpy.context.view_layer.update()
 lo, hi = world_bbox([root])
-print("tank_normalized: scale=%.4f dims=(%.2f, %.2f, %.2f) zmin=%.3f"
-      % (scale, hi.x - lo.x, hi.y - lo.y, hi.z - lo.z, lo.z))
+print("tank_normalized: scale=1.3001 dims=(%.2f, %.2f, %.2f) zmin=%.3f"
+      % (hi.x - lo.x, hi.y - lo.y, hi.z - lo.z, lo.z))
 
 # 平滑法线统一关闭（Kenney 玩具风 = 平直着色）
 for o in subtree([root]):

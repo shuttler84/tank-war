@@ -142,8 +142,7 @@
 <div id="proto-status">初始化…</div>
 
 <!-- 与 index.html 完全相同的游戏脚本（本阶段不修改任何现有文件） -->
-<script src="js/config.js"></script>
-<script src="js/mapsize.js"></script>
+<script src="js/config.js"></script><script src="js/mapsize.js"></script>
 <script src="js/utils.js"></script>
 <script src="js/isoview.js"></script>
 <script src="js/physics.js"></script>
@@ -157,6 +156,9 @@
 <script src="js/game.js"></script>
 <script src="js/ui.js"></script>
 <script src="js/main.js"></script>
+
+<!-- 3D 接入验收驱动：仅 ?itest=1 时生效（无头自动化用） -->
+<script src="tests/integration-3d.page.js"></script>
 
 <!-- 3D 视图原型（模块，经 importmap 解析本地 vendor 依赖） -->
 <script type="module" src="js/three-proto.js"></script>

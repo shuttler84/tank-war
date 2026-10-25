@@ -5,10 +5,21 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>坦克动荡：本地版</title>
 <link rel="stylesheet" href="style.css">
+<style>
+  /* 3D 视图层：WebGL 画布垫在 2D HUD 画布之下。
+     file:// 直开时 3D 模块无法加载 → 自动回退原版 2D 等距渲染，游戏不受影响。 */
+  #gl { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  #game { position: relative; }
+</style>
+<script type="importmap">
+{ "imports": { "three": "./vendor/three.module.js", "three/addons/": "./vendor/addons/" } }
+</script>
 </head>
 <body>
 <div id="app">
   <div id="stage">
+    <!-- WebGL 层：3D 战场（js/three-proto.js）；加载失败时仅 2D 层运行 -->
+    <canvas id="gl"></canvas>
     <!-- 画布实际分辨率由 Game.applyViewSize 按窗口大小与 DPR 动态设置 -->
     <canvas id="game"></canvas>
 
@@ -28,7 +39,7 @@
           <div class="topbar-actions">
             <button type="button" class="ghost slim" id="btn-fullscreen" title="切换浏览器全屏">⛶ 全屏</button>
             <button type="button" class="ghost slim" id="btn-sound">音效：开</button>
-            <span class="version">v2.0 · 离线单机</span>
+            <span class="version" id="view-mode">v2.1 · 2D等距</span>
           </div>
         </header>
 
@@ -146,5 +157,11 @@
 <script src="js/game.js"></script>
 <script src="js/ui.js"></script>
 <script src="js/main.js"></script>
+
+<!-- 3D 接入验收驱动：仅 ?itest=1 时生效（无头自动化用） -->
+<script src="tests/integration-3d.page.js"></script>
+
+<!-- 3D 视图层（模块）：http(s) 下生效并接管世界渲染；file:// 下加载失败 → 原版渲染 -->
+<script type="module" src="js/three-proto.js"></script>
 </body>
 </html>
