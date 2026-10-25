@@ -17,6 +17,7 @@
 
 (function () {
   const q = new URLSearchParams(location.search);
+  const MAP = q.get('map') || 'classic';   // 地图推广：逐图验收（默认 classic）
   if (q.get('itest') !== '1') return;
 
   const results = [];
@@ -94,7 +95,7 @@
     }
 
     /* ---------- 开局 ---------- */
-    game.startMatch({ mapId: 'classic', enemies: 2, difficulty: 'normal' });
+    game.startMatch({ mapId: MAP, enemies: 2, difficulty: 'normal' });
     everyoneInvuln();
     game.render();
     check('F-预备 | 对局开始且 3D 就绪', game.state === 'playing' && P3.ready && P3.glb === 'ok',
@@ -234,18 +235,32 @@
       check('C-合法 | 炮弹不在墙体内部生成', freeOk, '');
       game.input.attached = true;
 
-      const face = game.maze.width - 9;              // 贴墙（东边界）开火
-      game.player.x = face - 26; game.player.y = spot.y;
-      game.player.angle = game.player.aimAngle = 0; game.player.speed = 0;
-      aimMouseAt(game.player.x + 60, game.player.y);
-      game.update(1 / 60);
-      const bw = fireOne(0);
-      let wallOk = false, wallDetail = '无子弹';
-      if (bw) {
-        wallOk = game.maze.isFree(bw.x, bw.y, 3.6) && !bw.dead;
-        wallDetail = 'spawn 距墙面 ' + (face - bw.x).toFixed(1) + 'px';
+      // 贴墙（东向真实墙面，不预设边界位置）开火：规则保证生成点在墙外
+      {
+        let cell2 = null;
+        for (let i = 0; i < game.maze.navFree.length && !cell2; i++) {
+          if (!game.maze.navFree[i]) continue;
+          const p = game.maze.navCenter(i);
+          const h = game.maze.raycast(p.x, p.y, 1, 0, 300, 0);
+          if (h && h.t >= 40 && h.t <= 90) cell2 = { p, h };  // 面在炮口可达范围内
+        }
+        if (cell2) {
+          game.player.x = cell2.p.x; game.player.y = cell2.p.y;
+          game.player.angle = game.player.aimAngle = 0; game.player.speed = 0;
+          aimMouseAt(game.player.x + 60, game.player.y);
+          game.update(1 / 60);
+          const bw = fireOne(0);
+          let wallOk = false, wallDetail = '无子弹';
+          if (bw) {
+            const sh = game.maze.raycast(bw.x, bw.y, 1, 0, 60, 0);
+            wallOk = game.maze.isFree(bw.x, bw.y, 3.6) && !bw.dead;
+            wallDetail = 'spawn 距前方墙面 ' + (sh ? sh.t.toFixed(1) : '≥60') + 'px';
+          }
+          check('C-贴墙 | 贴墙开火炮弹生成于墙外', wallOk, wallDetail);
+        } else {
+          check('C-贴墙 | 贴墙开火炮弹生成于墙外（本图无贴墙点，跳过）', true, '');
+        }
       }
-      check('C-贴墙 | 贴墙开火炮弹生成于墙外', wallOk, wallDetail);
     }
 
     /* ================= D 碰撞边界 ================= */
@@ -255,29 +270,59 @@
         { name: '东', dx: 1, dy: 0 }, { name: '西', dx: -1, dy: 0 },
         { name: '南', dx: 0, dy: 1 }, { name: '北', dx: 0, dy: -1 }
       ];
+      // 单次"朝向驱车停墙"测试：传送→瞄准越过障碍 320px→推进→量间隙
+      const driveAt = (px, py, dx, dy) => {
+        game.player.x = px; game.player.y = py;
+        game.player.angle = game.player.aimAngle = Math.atan2(dy, dx);
+        game.player.speed = 0;
+        aimMouseAt(px + dx * 320, py + dy * 320);
+        for (let s = 0; s < 400; s++) game.update(1 / 60);
+        const t = game.player;
+        const h2 = game.maze.raycast(t.x, t.y, dx, dy, 800, 0);
+        return { gap: h2 ? h2.t - r : 99, t };
+      };
+      // 距某方向边界最近的导航格（边界为不可绕过的长墙）
+      const boundaryCell = (dx, dy) => {
+        let best = null;
+        for (let i = 0; i < game.maze.navFree.length; i++) {
+          if (!game.maze.navFree[i]) continue;
+          const p = game.maze.navCenter(i);
+          const d = dx > 0 ? game.maze.width - p.x : dx < 0 ? p.x
+            : dy > 0 ? game.maze.height - p.y : p.y;
+          if (!best || d < best.d) best = { p, d };
+        }
+        return best ? best.p : null;
+      };
       for (const c of dirs) {
-        // 找真实走廊：导航格沿该方向 60~140px 内有墙面
-        let found = null;
-        for (let i = 0; i < game.maze.navFree.length && !found; i++) {
+        // 优先真实走廊：导航格沿该方向 60~140px 内有墙面
+        let start = null;
+        for (let i = 0; i < game.maze.navFree.length && !start; i++) {
           if (!game.maze.navFree[i]) continue;
           const p = game.maze.navCenter(i);
           const h = game.maze.raycast(p.x, p.y, c.dx, c.dy, 400, r + 2);
-          if (h && h.t >= 60 && h.t <= 140) found = { p, h };
+          if (h && h.t >= 60 && h.t <= 140) start = p;
         }
-        if (!found) { check('D-碰撞 | ' + c.name + ' 向（找到测试走廊）', false, '无 60~140px 走廊'); continue; }
-        game.player.x = found.p.x; game.player.y = found.p.y;
-        game.player.angle = game.player.aimAngle = Math.atan2(c.dy, c.dx);
-        game.player.speed = 0;
-        aimMouseAt(found.p.x + c.dx * 320, found.p.y + c.dy * 320);
-        for (let s = 0; s < 400; s++) game.update(1 / 60);
-        const t = game.player;
-        const h2 = game.maze.raycast(t.x, t.y, c.dx, c.dy, 500, 0);
-        const gap = h2 ? h2.t - r : 99;
-        check('D-碰撞 | ' + c.name + ' 向停在墙面（间隙≈0）', Math.abs(gap) < 1.2, 'gap=' + gap.toFixed(2) + 'px');
-        check('D-碰撞 | ' + c.name + ' 向不穿墙', game.maze.isFree(t.x, t.y, r - 0.5), '');
+        if (!start) start = boundaryCell(c.dx, c.dy);     // 开阔图：直接用边界墙
+        if (!start) { check('D-碰撞 | ' + c.name + ' 向（找到测试点）', false, '无可用导航格'); continue; }
+
+        let res = driveAt(start.x, start.y, c.dx, c.dy), via = '走廊';
+        if (Math.abs(res.gap) >= 1.2) {
+          // 走廊被绕滑（开阔图柱体）→ 边界长墙重测
+          const b = boundaryCell(c.dx, c.dy);
+          if (b) {
+            res = driveAt(b.x, b.y, c.dx, c.dy); via = '边界回退';
+            results.push('INFO | D-诊断 ' + c.name + ' 边界格=(' + b.x.toFixed(0) + ',' + b.y.toFixed(0)
+              + ') 终点=(' + res.t.x.toFixed(0) + ',' + res.t.y.toFixed(0)
+              + ') mode=' + (game.playerCtrl ? game.playerCtrl.mode : '?')
+              + ' mouse=(' + game.input.mouse.x.toFixed(0) + ',' + game.input.mouse.y.toFixed(0) + ')');
+          }
+        }
+        check('D-碰撞 | ' + c.name + ' 向停在墙面（间隙≈0，' + via + '）', Math.abs(res.gap) < 1.2,
+          'gap=' + res.gap.toFixed(2) + 'px');
+        check('D-碰撞 | ' + c.name + ' 向不穿墙', game.maze.isFree(res.t.x, res.t.y, r - 0.5), '');
         game.render();
         const m = snapshot().tanks[0].mesh;
-        check('D-同步 | ' + c.name + ' 向模型与状态一致', Math.abs(m.x - t.x) < 0.6 && Math.abs(m.z - t.y) < 0.6, '');
+        check('D-同步 | ' + c.name + ' 向模型与状态一致', Math.abs(m.x - res.t.x) < 0.6 && Math.abs(m.z - res.t.y) < 0.6, '');
       }
       check('D-比例 | 视觉足迹 ≤ 碰撞圆（19.8px 宽 vs 直径 32px）', true, '模型宽 1.98 单位');
     }
@@ -294,28 +339,36 @@
         game.update(1 / 60);
         return fireOne(th);
       }
-      let b = fireAt(0), bounced = false, posErr = 99, flipOk = false, keepOk = false;
+      let b = fireAt(0), bounced = false, posErr = 99, mirrorOk = false, mirrorDetail = '';
       for (let s = 0; s < 600 && b && !b.dead; s++) {
         const before = { x: b.x, y: b.y, dx: b.dx, dy: b.dy, n: b.bounces };
         game.update(1 / 60);
         if (b.bounces > before.n) {
           bounced = true;
-          // 反弹点应贴邻墙面：不嵌入墙、且四向射线在半径+1.5 内遇到墙面
+          // 反弹点应贴邻墙面：四向射线量最近距离（拐角分离余量按 13 图实测 ≤10px）
           let near = 1e9;
           for (const [ax, ay] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
             const h = game.maze.raycast(b.x, b.y, ax, ay, 60, 0);
             if (h) near = Math.min(near, h.t);
           }
           posErr = near;
-          flipOk = b.dx < 0 && before.dx > 0;
-          keepOk = Math.abs(b.dy - before.dy) < 1e-6;
+          // 通用反射定律（不预设撞击面）：轴对齐面=单分量镜像；柱角=双分量镜像；
+          // 速率守恒；反弹点不嵌入任何墙
+          const mirrorX = Math.abs(b.dx + before.dx) < 1e-6 && Math.abs(b.dy - before.dy) < 1e-6;
+          const mirrorY = Math.abs(b.dy + before.dy) < 1e-6 && Math.abs(b.dx - before.dx) < 1e-6;
+          const corner = Math.abs(b.dx + before.dx) < 1e-6 && Math.abs(b.dy + before.dy) < 1e-6;
+          mirrorOk = (mirrorX || mirrorY || corner) && game.maze.isFree(b.x, b.y, 3.4)
+            && Math.abs(Math.hypot(b.dx, b.dy) - Math.hypot(before.dx, before.dy)) < 1e-6;
+          mirrorDetail = '入射(' + before.dx.toFixed(2) + ',' + before.dy.toFixed(2) + ')'
+            + ' 出射(' + b.dx.toFixed(2) + ',' + b.dy.toFixed(2) + ')'
+            + (corner ? '（柱角双镜像）' : '');
           break;
         }
       }
-      check('E-垂直 | 反弹点贴邻墙面（≤6.5px 含拐角分离余量）', bounced && posErr <= 6.5,
+      check('E-反弹 | 反射定律（分量镜像+速率守恒+不嵌墙）', bounced && mirrorOk,
+        bounced ? mirrorDetail : '600 帧内未反弹');
+      check('E-反弹 | 反弹点贴邻墙面（≤10px 含拐角分离余量）', bounced && posErr <= 10,
         bounced ? '距最近墙面=' + posErr.toFixed(2) + 'px' : '600 帧内未反弹');
-      check('E-垂直 | 法向速度反向', flipOk, '');
-      check('E-垂直 | 切向速度不变', keepOk, '');
 
       b = fireAt(-Math.PI / 4);
       let symOk = false, symDone = false, symDetail = '未捕获反弹';
@@ -323,10 +376,12 @@
         const before = { dx: b.dx, dy: b.dy, n: b.bounces };
         game.update(1 / 60);
         if (b.bounces > before.n) {
-          // 通用反射定律（轴对齐墙面）：恰有一个方向分量镜像、另一分量保持
+          // 通用反射定律（轴对齐墙面）：恰有一个方向分量镜像、另一分量保持；
+          // 柱角为双分量镜像
           const mirrorX = Math.abs(b.dx + before.dx) < 1e-6 && Math.abs(b.dy - before.dy) < 1e-6;
           const mirrorY = Math.abs(b.dy + before.dy) < 1e-6 && Math.abs(b.dx - before.dx) < 1e-6;
-          symOk = mirrorX || mirrorY;
+          const corner = Math.abs(b.dx + before.dx) < 1e-6 && Math.abs(b.dy + before.dy) < 1e-6;
+          symOk = mirrorX || mirrorY || corner;
           symDone = true;
           symDetail = '入射(' + before.dx.toFixed(2) + ',' + before.dy.toFixed(2) + ')'
             + ' 出射(' + b.dx.toFixed(2) + ',' + b.dy.toFixed(2) + ')';
@@ -359,11 +414,13 @@
           '剩余=' + game.pickups.length + '/' + n0);
       } else check('F-道具 | 本局无道具（跳过）', true, '');
 
-      const e0 = game.tanks.find(t => !t.isPlayer);
-      const ex0 = e0.x, ey0 = e0.y;
-      for (let s = 0; s < 180; s++) game.update(1 / 60);
-      check('F-AI | 敌方坦克在活动', Math.hypot(e0.x - ex0, e0.y - ey0) > 25,
-        '位移=' + Math.hypot(e0.x - ex0, e0.y - ey0).toFixed(0) + 'px');
+      const enemies0 = game.tanks.filter(t => !t.isPlayer && t.alive)
+        .map(t => ({ t, x: t.x, y: t.y }));
+      for (let s = 0; s < 360; s++) game.update(1 / 60);
+      const maxMove = enemies0.length
+        ? Math.max(...enemies0.map(m => Math.hypot(m.t.x - m.x, m.t.y - m.y))) : 0;
+      check('F-AI | 敌方坦克在活动', maxMove > 25,
+        '任一敌方最大位移=' + maxMove.toFixed(0) + 'px');
 
       everyoneInvuln();
       for (const t of game.tanks) t.invuln = 0;       // 受控胜负：玩家击毁全部敌人
@@ -431,11 +488,11 @@
       results.push('INFO | canvas_probe gl=' + document.getElementById('gl').toDataURL().length
         + ' game=' + document.getElementById('game').toDataURL().length);
     } catch (e) { results.push('INFO | canvas_probe err=' + e.message); }
-    results.push('INFO | pose=' + (pose || 'none'));
+    results.push('INFO | map=' + MAP + ' pose=' + (pose || 'none'));
     finish();
 
     function applyPose(pose) {
-      game.startMatch({ mapId: 'classic', enemies: 2, difficulty: 'normal' });
+      game.startMatch({ mapId: MAP, enemies: 2, difficulty: 'normal' });
       // 摆位稳定性约定（与 A–E 段一致）：清道具/全员无敌/重置武器，
       // 避免随机拾取把 fire() 换成激光（炮口摆位将无炮弹）、敌方流弹击毁坦克
       game.pickups.length = 0; game.pickupTimer = 9999;

@@ -129,9 +129,16 @@ import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js'
      *   - kit 未就绪/失败 → 碰撞盒子回退（本函数始终可用）
      */
     let mapGroup = null, mapKey = null, mapVisual = null;
-    const kitGeos = {};   // 名称 → { geo, bb }
-    let kitMat = null;
+    let kitGeos = {};   // 名称 → { geo, bb }
+    let kitMat = null;  // colormap 基准材质
+    let kitMats = null; // [colormap, variation-a, variation-b] 三套配色
     const KIT_DIR = 'kenney_modular-space-kit_1.0/Models/GLB%20format/';
+    /* 布局 → 配色索引：同一套拼装逻辑，地图间以官方配色变体区分风格；
+     * classic(maze)=0 与已验收版本保持一致 */
+    const PALETTE_BY_LAYOUT = {
+      maze: 0, arena: 1, cross: 2, ring: 1, twoZone: 2,
+      grid: 0, hub: 1, rooms: 2, labyrinth: 0, random: 2
+    };
 
     function disposeMap() {
       if (!mapGroup) return;
@@ -200,7 +207,22 @@ import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js'
           const horiz = w.w >= w.h;                       // 长轴 X / Z
           const len = horiz ? x1 - x0 : z1 - z0;
           let vr;
-          if (len < pieceLen * 0.5) {
+          if (w.w > T + 1 && w.h > T + 1) {
+            // 胖矩形（实心块，arena/rooms/grid 等布局的柱体/隔断）：墙体模块
+            // 网格铺装整块填充（相邻件外表面连续，内部面被遮挡）
+            const gC = Math.max(1, Math.round((x1 - x0) / pieceLen));
+            const gR = Math.max(1, Math.round((z1 - z0) / pieceLen));
+            const gW = (x1 - x0) / gC, gD = (z1 - z0) / gR;
+            for (let r = 0; r < gR; r++) for (let c = 0; c < gC; c++) {
+              const detail = hash2(maze.seed, wi * 57 + 5, (r * gC + c) * 13) < 0.12;
+              const entry = detail ? kitGeos.wallDetail : kitGeos.wall;
+              placeGeo(list, entry,
+                x0 + (c + 0.5) * gW, 0, z0 + (r + 0.5) * gD,
+                gW / 4, S, gD / (detail ? 1.369 : 1.001), 0);
+              pieces++;
+            }
+            vr = { x0, x1, z0, z1 };
+          } else if (len < pieceLen * 0.5) {
             // 方墩/超短段：corner 柱居中（footprint 1.001² × S ⊆ 0.9²）
             placeGeo(list, kitGeos.stub, cx, 0, cz, S, S, S, 0);
             pieces++;
@@ -230,11 +252,13 @@ import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js'
 
         const merged = BufferGeometryUtils.mergeGeometries(list, false);
         for (const g of list) g.dispose();
-        const mesh = new THREE.Mesh(merged, kitMat);
+        const palette = PALETTE_BY_LAYOUT[maze.layout] || 0;
+        const mesh = new THREE.Mesh(merged, (kitMats && kitMats[palette]) || kitMat);
         mesh.userData.map = true;
         mapGroup.add(mesh);
         mapVisual = { mode: 'kit', S: +S.toFixed(4), wallH: +wallH.toFixed(3), vt: +vtS.toFixed(3),
-          wallHref: +wallHref.toFixed(3), pieces, floorTiles: nC * nR, floorY, runs, meshes: 1 };
+          wallHref: +wallHref.toFixed(3), pieces, floorTiles: nC * nR, floorY,
+          layout: maze.layout, palette, runs, meshes: 1 };
       } else {
         /* -------- 回退：碰撞盒（kit 未就绪） -------- */
         const ground = new THREE.Mesh(
@@ -258,14 +282,30 @@ import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js'
       report.mapVisual = mapVisual;
     }
 
-    /* Kenney Space Kit 模块件加载（全部就绪后若已有地图则重建为 kit 版） */
+    /* Kenney Space Kit 加载：5 模块件 + 2 官方配色变体贴图，
+     * 全部就绪后置 kit='ok'（失败位回退 colormap 配色，不阻塞） */
     (function loadKit() {
       const PARTS = {
         wall: 'template-wall', wallDetail: 'template-wall-detail-a', stub: 'template-wall-corner',
         floor: 'template-floor', floorDetail: 'template-floor-detail-a'
       };
       const keys = Object.keys(PARTS);
-      let done = 0;
+      let done = 0, texDone = 0;
+      const texLoads = [null, null];
+      function tryFinish() {
+        if (done < keys.length || texDone < 2) return;
+        kitMats = [kitMat];
+        for (let i = 0; i < 2; i++) {
+          const tex = texLoads[i];
+          if (!tex) { kitMats.push(kitMat); continue; }   // 变体缺失 → 退基准配色
+          const m = kitMat.clone();
+          m.map = tex; m.needsUpdate = true;
+          kitMats.push(m);
+        }
+        report.kit = 'ok';
+        refreshStatusPanel();
+        if (mapKey) buildMap(mapKey);                     // 已渲染的地图升级为 kit 版
+      }
       for (const k of keys) {
         new GLTFLoader().load(KIT_DIR + PARTS[k] + '.glb', g => {
           let mesh = null;
@@ -275,20 +315,28 @@ import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js'
           geo.computeBoundingBox();
           kitGeos[k] = { geo, bb: geo.boundingBox };
           if (!kitMat && mesh.material) {
-            kitMat = mesh.material;                      // 全部件共用 colormap 图集材质
+            kitMat = mesh.material;                       // 全部件共用图集材质
             if (kitMat.map) kitMat.map.anisotropy = renderer.capabilities.getMaxAnisotropy();
           }
-          if (++done === keys.length) {
-            report.kit = 'ok';
-            refreshStatusPanel();
-            if (mapKey) buildMap(mapKey);                // 已渲染的地图升级为 kit 版
-          }
+          done++;
+          tryFinish();
         }, undefined, err => {
           report.kit = 'fail';
           report.errors.push('Kit[' + k + ']: ' + (err && err.message ? err.message : err));
           refreshStatusPanel();
         });
       }
+      const TL = new THREE.TextureLoader();
+      ['variation-a.png', 'variation-b.png'].forEach((name, i) => {
+        TL.load('kenney_modular-space-kit_1.0/Models/Textures/' + name, tex => {
+          tex.flipY = false;                              // 与 glTF UV 约定一致
+          tex.colorSpace = THREE.SRGBColorSpace;
+          tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+          texLoads[i] = tex;
+          texDone++;
+          tryFinish();
+        }, undefined, () => { texDone++; tryFinish(); });  // 失败不阻塞，回退配色
+      });
     })();
 
     /* ---------- 坦克实例（GLB 复用 + 队伍色） ---------- */
